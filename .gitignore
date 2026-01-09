@@ -1,0 +1,26 @@
+# 依赖包（一般通过 npm/yarn 安装，不需要提交）
+node_modules/
+ 
+# 编译生成的产物目录（uniapp 编译后输出到 unpackage）
+unpackage/
+dist/
+build/
+ 
+# 其他临时文件、日志等
+*.log
+.DS_Store
+ 
+ 
+# 源码映射文件
+*.map
+ 
+# 编辑器/IDE 相关（VS Code 的工作区配置，不同编辑器可按需加）
+.vscode/
+.idea/
+ 
+# Source Map 文件（调试用，非业务代码）
+*.js.map
+ 
+# 其他常见忽略
+logs/ 
+ 

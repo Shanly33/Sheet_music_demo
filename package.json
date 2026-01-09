@@ -1,0 +1,42 @@
+{
+
+	"name": "test",
+
+	"version": "1.0.0",
+
+	"main": "main.js",
+
+	"scripts": {
+
+		"test": "echo \"Error: no test specified\" && exit 1"
+
+	},
+
+	"dependencies": {
+
+		"@tonejs/midi": "^2.0.28",
+
+		"clipboard": "^2.0.11",
+
+		"crypto-js": "^4.2.0",
+
+		"dayjs": "^1.11.19",
+
+		"pinia-plugin-persistedstate": "^4.7.1",
+
+		"uuid": "^13.0.0",
+
+		"vexflow": "^4.1.0"
+
+	},
+
+	"keywords": [],
+
+	"author": "",
+
+	"license": "ISC",
+
+	"description": ""
+
+}
+
