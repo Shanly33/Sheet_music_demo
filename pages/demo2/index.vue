@@ -47,11 +47,19 @@ function getWxCanvas2D(canvasId) {
   });
 }
 
+function applyDots(note, dots) {
+  const n = Number(dots) || 0;
+  if (n > 0 && note instanceof VF.StaveNote) {
+    for (let i = 0; i < n; i++) {
+      note.addModifier(new VF.Dot()); // 用 addModifier 添加附点
+    }
+  }
+}
+
 /* ===============================
  * 渲染：scoreModel -> canvas
  * =============================== */
 function renderScoreModelToCanvas(scoreModel, wx2dCtx, opts = {}) {
-  // ✅ 4.x 全部从 VF（Vex.Flow）里拿
   const Renderer = VF.Renderer;
   const Stave = VF.Stave;
   const StaveNote = VF.StaveNote;
@@ -62,20 +70,13 @@ function renderScoreModelToCanvas(scoreModel, wx2dCtx, opts = {}) {
   const StaveTie = VF.StaveTie;
   const Accidental = VF.Accidental;
 
-  // ✅ 小程序环境：用 proxy 更稳（如果你的构建产物支持这个开关）
+  // 小程序环境：用 proxy 更稳（如果你的构建产物支持这个开关）
   if (Renderer && "USE_CANVAS_PROXY" in Renderer) {
     Renderer.USE_CANVAS_PROXY = true;
   }
 
-  // ✅ 关键：bolsterCanvasContext 在 VF.Renderer 上
+  // 关键：bolsterCanvasContext 在 VF.Renderer 上
   const ctx = VF.CanvasContext ? new VF.CanvasContext(wx2dCtx) : wx2dCtx;
-
-  console.log(
-    "VF.CanvasContext exists:",
-    !!VF.CanvasContext,
-    "ctx keys:",
-    Object.keys(ctx)
-  );
 
   // 清屏
   if (ctx.clear) ctx.clear();
@@ -87,7 +88,7 @@ function renderScoreModelToCanvas(scoreModel, wx2dCtx, opts = {}) {
   const staffId = opts.staff ?? "treble";
   const staveX0 = opts.x ?? 10;
   const staveY0 = opts.y ?? 40;
-  const staveW = opts.measureWidth ?? 280;
+  const staveW = opts.measureWidth ?? 260;
   const gapX = opts.gapX ?? 20;
 
   const eventNoteMap = new Map(); // eventId -> StaveNote
@@ -112,15 +113,12 @@ function renderScoreModelToCanvas(scoreModel, wx2dCtx, opts = {}) {
       if (Barline?.type) stave.setBegBarType(Barline.type.NONE);
     }
 
-    // stave.addClef(staffId === "bass" ? "bass" : "treble");
-    // stave.addTimeSignature(`${m.timeSignature[0]}/${m.timeSignature[1]}`);
     stave.setContext(ctx).draw();
 
     // 2) events -> tickables
     const tickables = [];
     for (const ev of voiceModel.events) {
       if (ev.type === "rest") {
-        // rest：duration 已经是 "8r"/"qr"/"hr" 这种
         tickables.push(
           new StaveNote({
             clef: staffId === "bass" ? "bass" : "treble",
@@ -146,6 +144,9 @@ function renderScoreModelToCanvas(scoreModel, wx2dCtx, opts = {}) {
         });
       }
 
+      // 添加附点
+      applyDots(note, ev.vf.dots);
+
       tickables.push(note);
       if (ev.id) eventNoteMap.set(ev.id, note);
     }
@@ -156,11 +157,8 @@ function renderScoreModelToCanvas(scoreModel, wx2dCtx, opts = {}) {
       beat_value: m.timeSignature[1],
     }).addTickables(tickables);
 
-    new Formatter().joinVoices([vfVoice]).format([vfVoice], staveW - 40);
-    // vfVoice.draw(ctx, stave);
+    new Formatter().joinVoices([vfVoice]).format([vfVoice], staveW - 60);
 
-    // ✅【关键】先创建 beams（不要 draw）
-    // 这样 VexFlow 在画音符时就知道这些音符属于 beam，从而不画旗子
     // 4) beams
     const vfBeams = [];
     for (const b of voiceModel.beams || []) {
@@ -174,12 +172,13 @@ function renderScoreModelToCanvas(scoreModel, wx2dCtx, opts = {}) {
     }
 
     vfVoice.draw(ctx, stave);
-    // ✅ 最后再画 beams（只负责画横梁）
+
+    // 绘制横梁
     for (const beam of vfBeams) {
       beam.setContext(ctx).draw();
     }
 
-    // 5) tuplets（先构建，后 draw）
+    // 5) tuplets
     const vfTuplets = [];
     for (const t of voiceModel.tuplets || []) {
       const notesForTuplet = (t.eventIds || [])
