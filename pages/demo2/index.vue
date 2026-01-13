@@ -4,7 +4,7 @@
     <canvas
       id="scoreCanvas"
       type="2d"
-      style="width: 750rpx; height: 500px"
+      style="width: 750rpx; height: 800px"
     ></canvas>
   </view>
 </template>
@@ -16,7 +16,7 @@ import { selectAndParseMidi } from "@/utils/midi/readMidi";
 import { midiJsonToScoreModel } from "./midiToScoreModel.js";
 
 const instance = getCurrentInstance();
-const VF = Vex.Flow; // ✅ VexFlow 4.x 正确入口
+const VF = Vex.Flow; // VexFlow 4.x 正确入口
 
 const midiJson = ref(null);
 
@@ -86,19 +86,42 @@ function renderScoreModelToCanvas(scoreModel, wx2dCtx, opts = {}) {
   if (!part) return;
 
   const staffId = opts.staff ?? "treble";
-  const staveX0 = opts.x ?? 10;
-  const staveY0 = opts.y ?? 40;
-  const staveW = opts.measureWidth ?? 260;
-  const gapX = opts.gapX ?? 20;
+  const staveX0 = opts.x ?? 10; // 小节起始位置 x
+  const staveY0 = opts.y ?? 10; // 小节起始位置 y
+  const staveW = opts.measureWidth ?? 280; // 小节宽度
+  const gapX = opts.gapX ?? 20; // 小节之间的间距
+  const maxLineWidth = opts.maxLineWidth ?? 300; // 每行的最大宽度
+  const lineHeight = opts.lineHeight ?? 80; // 每行的高度，保证足够容纳音符
+
+  let currentLineWidth = 0; // 当前行的总宽度
+  let currentLineY = staveY0; // 当前行的y坐标
+  let x = staveX0; // 当前小节的起始横坐标
+  let y = currentLineY; // 当前小节的纵坐标
 
   const eventNoteMap = new Map(); // eventId -> StaveNote
 
-  let x = staveX0;
-  let y = staveY0;
-
-  for (const m of part.measures) {
+  for (let i = 0; i < part.measures.length; i++) {
+    const m = part.measures[i];
     const voiceModel = m.voices?.[staffId];
     if (!voiceModel) continue;
+
+    // 计算当前小节的宽度（包含小节间距）
+    const currentStaveWidth = staveW + gapX;
+
+    // 计算下一个小节的宽度（如果存在）
+    const nextStaveWidth = i + 1 < part.measures.length ? staveW + gapX : 0;
+
+    // 判断从第二小节开始是否超出最大行宽
+    if (
+      i > 0 &&
+      currentLineWidth + currentStaveWidth + nextStaveWidth > maxLineWidth
+    ) {
+      // 换行：重置当前行宽度为 0
+      currentLineWidth = 0;
+      currentLineY += lineHeight; // 行高增加
+      y = currentLineY; // 更新当前y坐标
+      x = staveX0; // 换行后x坐标重置
+    }
 
     // 1) 画小节线
     const stave = new Stave(x, y, staveW);
@@ -207,7 +230,9 @@ function renderScoreModelToCanvas(scoreModel, wx2dCtx, opts = {}) {
       }
     }
 
-    x += staveW + (opts.gapX ?? 0);
+    // 更新小节的 x 位置和当前行宽度
+    x += staveW + gapX;
+    currentLineWidth += currentStaveWidth; // 更新当前行宽度
   }
 
   return { eventNoteMap };
@@ -271,7 +296,7 @@ onMounted(async () => {
 </script>
 <style scoped>
 .page {
-  margin-top: 40vh;
+  margin-top: 10vh;
   padding: 32rpx;
 }
 .status {
