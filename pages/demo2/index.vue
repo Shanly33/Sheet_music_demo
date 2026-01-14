@@ -100,6 +100,10 @@ function renderScoreModelToCanvas(scoreModel, wx2dCtx, opts = {}) {
 
   const eventNoteMap = new Map(); // eventId -> StaveNote
 
+  // 获取调号
+  const keySignature = scoreModel.header.keySignatures?.[0];
+  const key = keySignature ? keySignature.key : null;
+
   for (let i = 0; i < part.measures.length; i++) {
     const m = part.measures[i];
     const voiceModel = m.voices?.[staffId];
@@ -125,15 +129,19 @@ function renderScoreModelToCanvas(scoreModel, wx2dCtx, opts = {}) {
 
     // 1) 画小节线
     const stave = new Stave(x, y, staveW);
-    const Barline = VF.Barline;
     const isFirstMeasure = m.index === 0;
 
     if (isFirstMeasure) {
       stave.addClef(staffId === "bass" ? "bass" : "treble");
       stave.addTimeSignature(`${m.timeSignature[0]}/${m.timeSignature[1]}`);
+
+      // 添加调号
+      if (key) {
+        stave.addKeySignature(key); // 添加调号
+      }
     } else {
       // 中间小节不画左边竖线
-      if (Barline?.type) stave.setBegBarType(Barline.type.NONE);
+      // if (Barline?.type) stave.setBegBarType(Barline.type.NONE);
     }
 
     stave.setContext(ctx).draw();
@@ -264,7 +272,7 @@ async function onSelectMidi() {
 
     renderScoreModelToCanvas(scoreModel, wxCtxRef.value, {
       staff: "treble",
-      measureWidth: 260,
+      measureWidth: 220,
       gapX: 0, //小节空隙
     });
   } catch (e) {
