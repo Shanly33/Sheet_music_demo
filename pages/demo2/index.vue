@@ -104,10 +104,17 @@ function renderScoreModelToCanvas(scoreModel, wx2dCtx, opts = {}) {
   const keySignature = scoreModel.header.keySignatures?.[0];
   const key = keySignature ? keySignature.key : null;
 
+  //渲染每个小节
   for (let i = 0; i < part.measures.length; i++) {
     const m = part.measures[i];
     const voiceModel = m.voices?.[staffId];
     if (!voiceModel) continue;
+
+    // 检查小节是否为空（仅包含休止符）
+    const hasNotes = voiceModel.events.some((ev) => ev.type !== "rest");
+
+    // 如果小节只有休止符，则跳过渲染
+    if (!hasNotes) continue;
 
     // 计算当前小节的宽度（包含小节间距）
     const currentStaveWidth = staveW + gapX;
@@ -131,10 +138,11 @@ function renderScoreModelToCanvas(scoreModel, wx2dCtx, opts = {}) {
     const stave = new Stave(x, y, staveW);
     const isFirstMeasure = m.index === 0;
 
-    if (isFirstMeasure) {
+    if (isFirstMeasure || (i > 0 && currentLineWidth === 0)) {
       stave.addClef(staffId === "bass" ? "bass" : "treble");
-      stave.addTimeSignature(`${m.timeSignature[0]}/${m.timeSignature[1]}`);
-
+      if (isFirstMeasure) {
+        stave.addTimeSignature(`${m.timeSignature[0]}/${m.timeSignature[1]}`);
+      }
       // 添加调号
       if (key) {
         stave.addKeySignature(key); // 添加调号
