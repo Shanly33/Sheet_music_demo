@@ -10,7 +10,7 @@
 </template>
 
 <script setup>
-import { getCurrentInstance, onMounted, ref } from "vue";
+import { getCurrentInstance, onMounted, ref, computed } from "vue";
 import Vex from "vexflow";
 import { selectAndParseMidi } from "@/utils/midi/readMidi";
 import { midiJsonToScoreModel } from "./midiToScoreModel.js";
@@ -25,6 +25,17 @@ const canvasRef = ref(null);
 const wxCtxRef = ref(null);
 const canvasSizeRef = ref({ width: 0, height: 0 });
 const dprRef = ref(1);
+
+// 新增：控制五线谱整体缩放比例（默认1，可根据需要调整）
+const scaleRatio = ref(0.5); // 0.8表示缩小到80%，1是原大小，1.2是放大到120%
+
+const canvasOriginalSizeRef = ref({ width: 0, height: 0 }); // 原始尺寸
+
+// 新增：计算布局用的「有效宽度」（原始宽度 ÷ 缩放比例 → 缩放越小，有效宽度越大）
+const layoutEffectiveWidth = computed(() => {
+  const originalWidth = canvasOriginalSizeRef.value.width || 300;
+  return originalWidth / scaleRatio.value; // 关键公式
+});
 
 /* ===============================
  * 获取微信小程序 canvas node + 2d ctx
@@ -55,6 +66,37 @@ function applyDots(note, dots) {
     }
   }
 }
+
+// 新增：重置Canvas状态并应用当前缩放
+function resetCanvasScale() {
+  if (!wxCtxRef.value || !canvasRef.value) return;
+
+  const ctx = wxCtxRef.value;
+  const canvas = canvasRef.value;
+  const dpr = dprRef.value;
+  const currentScale = scaleRatio.value;
+
+  // 1. 重置Canvas变换矩阵到初始状态（关键：清除之前的所有缩放/平移）
+  if (ctx.setTransform) {
+    ctx.setTransform(1, 0, 0, 1, 0, 0); // 重置变换矩阵
+  } else {
+    ctx.resetTransform(); // 兼容写法
+  }
+
+  // 2. 重新设置Canvas尺寸（避免重复渲染导致模糊）
+  canvas.width = canvasSizeRef.value.width * dpr;
+  canvas.height = canvasSizeRef.value.height * dpr;
+
+  // 3. 重新应用DPR + 当前缩放比例（仅一次，不叠加）
+  ctx.scale(dpr * currentScale, dpr * currentScale);
+
+  // 4. 同步更新实际可用尺寸
+  canvasSizeRef.value = {
+    width: canvasSizeRef.value.width / currentScale,
+    height: canvasSizeRef.value.height / currentScale,
+  };
+}
+
 /* ===============================
  * 渲染：scoreModel -> canvas
  * =============================== */
@@ -69,6 +111,9 @@ function renderScoreModelToCanvas(scoreModel, wx2dCtx, opts = {}) {
   const StaveTie = VF.StaveTie;
   const Accidental = VF.Accidental;
 
+  // 新增：渲染前先重置Canvas缩放状态（核心修复）
+  resetCanvasScale();
+
   // 小程序环境：用 proxy 更稳（如果你的构建产物支持这个开关）
   if (Renderer && "USE_CANVAS_PROXY" in Renderer) {
     Renderer.USE_CANVAS_PROXY = true;
@@ -77,9 +122,16 @@ function renderScoreModelToCanvas(scoreModel, wx2dCtx, opts = {}) {
   // 关键：bolsterCanvasContext 在 VF.Renderer 上
   const ctx = VF.CanvasContext ? new VF.CanvasContext(wx2dCtx) : wx2dCtx;
 
+  // // 新增：给VexFlow上下文应用缩放（和Canvas保持一致）
+  // const currentScale = opts.scaleFactor || scaleRatio.value;
+  // ctx.scale(currentScale, currentScale);
+
   // 清屏
+  // 清屏（注意缩放后清屏范围也要对应调整）
+  // const clearWidth = canvasSizeRef.value.width / currentScale;
+  // const clearHeight = canvasSizeRef.value.height / currentScale;
   if (ctx.clear) ctx.clear();
-  else if (ctx.clearRect) ctx.clearRect(0, 0, 99999, 99999);
+  else if (ctx.clearRect) ctx.clearRect(0, 0, 9999, 9999);
 
   const part = scoreModel?.parts?.[0];
   if (!part) return;
@@ -87,9 +139,10 @@ function renderScoreModelToCanvas(scoreModel, wx2dCtx, opts = {}) {
   const staffId = opts.staff ?? "treble";
   const staveX0 = opts.x ?? 0; // 小节起始位置 x
   const staveY0 = opts.y ?? 10; // 小节起始位置 y
-  const staveW = opts.measureWidth ?? 280; // 小节宽度
   const gapX = opts.gapX ?? 0; // 小节之间的间距
-  const maxLineWidth = canvasSizeRef.value.width ?? 300; // 每行的最大宽度
+  // const maxLineWidth = canvasSizeRef.value.width ?? 300; // 每行的最大宽度
+  // 关键：换行判断用「有效宽度」（和缩放联动）
+  const maxLineWidth = layoutEffectiveWidth.value ?? 300;
   const lineHeight = opts.lineHeight ?? 80; // 每行的高度，保证足够容纳音符
 
   let currentLineWidth = 0; // 当前行的总宽度
@@ -141,9 +194,6 @@ function renderScoreModelToCanvas(scoreModel, wx2dCtx, opts = {}) {
     const currentStaveWidth = m?.staveWidth + gapX;
 
     // 计算下一个小节的宽度（如果存在）
-    const nextSection = part?.measures[i + 1]?.staveWidth || 0;
-    const nextStaveWidth =
-      i + 1 < part.measures.length ? nextSection + gapX : 0;
     const exceed = i > 0 && currentLineWidth + currentStaveWidth > maxLineWidth;
     if (exceed) {
       // 换行：重置当前行宽度为 0
@@ -305,7 +355,8 @@ function renderScoreModelToCanvas(scoreModel, wx2dCtx, opts = {}) {
     x += currentStaveWidth + gapX;
     currentLineWidth += currentStaveWidth; // 更新当前行宽度
   }
-
+  // 恢复 Canvas 状态
+  // ctx.restore();
   return { eventNoteMap };
 }
 
@@ -342,6 +393,7 @@ async function onSelectMidi() {
         1: { 0: "#1f5eff", 1: "#1f5eff", 2: "#1f5eff" }, // 第0小节的第0/1/2个有效音符
         3: { 0: "#ff3b30", 1: "#ff3b30", 2: "#ff3b30", 3: "#ff3b30" }, // 第3小节的第1/2个有效音符染红
       },
+      // scaleFactor: 0.5,
     });
   } catch (e) {
     console.error("❌ MIDI 加载失败", e);
@@ -365,10 +417,20 @@ onMounted(async () => {
   canvas.width = width * dpr;
   canvas.height = height * dpr;
 
+  // 首次初始化缩放
+  resetCanvasScale();
+
   // 重置缩放，避免重复 mounted/热更新时叠加
-  if (ctx.setTransform) ctx.setTransform(1, 0, 0, 1, 0, 0);
-  ctx.scale(dpr, dpr);
+  // if (ctx.setTransform) ctx.setTransform(1, 0, 0, 1, 0, 0);
+  // ctx.scale(dpr, dpr);
+
+  // // 关键：同步更新canvasSizeRef的宽高（因为缩放后实际可用宽度会变化）
+  // canvasSizeRef.value = {
+  //   width: width / scaleRatio.value,
+  //   height: height / scaleRatio.value,
+  // };
 });
+
 const createData = (measures, staffId) => {
   let scoreWidth = {};
   for (let i = 0; i < measures.length; i++) {
@@ -376,7 +438,9 @@ const createData = (measures, staffId) => {
     const staveWidth = getMinVoiceWidth(m, staffId, i);
     if (staveWidth !== 0) scoreWidth[i] = staveWidth;
   }
-  const res = layoutWidthsObject(scoreWidth, canvasSizeRef.value.width);
+  // 关键：布局宽度计算用「有效宽度」（和缩放联动）
+  // const res = layoutWidthsObject(scoreWidth, canvasSizeRef.value.width);
+  const res = layoutWidthsObject(scoreWidth, layoutEffectiveWidth.value);
   Object.keys(res).forEach((key) => {
     measures[key].staveWidth = res[key];
   });
@@ -387,7 +451,6 @@ function getMinVoiceWidth(m, staffId, i) {
   const StaveNote = VF.StaveNote;
   const Voice = VF.Voice;
   const Formatter = VF.Formatter;
-  console.log("voiceModel", voiceModel);
   if (!voiceModel) return;
 
   // 检查小节是否为空（仅包含休止符）
@@ -414,13 +477,6 @@ function getMinVoiceWidth(m, staffId, i) {
       duration: ev.vf.duration,
       dots: ev.vf.dots || 0,
     });
-
-    // 临时记号
-    // if (ev.vf.accidentals) {
-    //   Object.entries(ev.vf.accidentals).forEach(([idx, acc]) => {
-    //     note.addModifier(new Accidental(acc), Number(idx));
-    //   });
-    // }
 
     // 添加附点
     applyDots(note, ev.vf.dots);
