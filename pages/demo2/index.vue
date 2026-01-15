@@ -4,7 +4,7 @@
     <canvas
       id="scoreCanvas"
       type="2d"
-      style="width: 750rpx; height: 800px"
+      style="width: 100%; height: 800px"
     ></canvas>
   </view>
 </template>
@@ -76,11 +76,11 @@ function renderScoreModelToCanvas(scoreModel, wx2dCtx, opts = {}) {
   if (!part) return;
 
   const staffId = opts.staff ?? "treble";
-  const staveX0 = opts.x ?? 10; // 小节起始位置 x
+  const staveX0 = opts.x ?? 0; // 小节起始位置 x
   const staveY0 = opts.y ?? 10; // 小节起始位置 y
   const staveW = opts.measureWidth ?? 280; // 小节宽度
-  const gapX = opts.gapX ?? 20; // 小节之间的间距
-  const maxLineWidth = opts.maxLineWidth ?? 300; // 每行的最大宽度
+  const gapX = opts.gapX ?? 0; // 小节之间的间距
+  const maxLineWidth = canvasSizeRef.value.width ?? 300; // 每行的最大宽度
   const lineHeight = opts.lineHeight ?? 80; // 每行的高度，保证足够容纳音符
 
   let currentLineWidth = 0; // 当前行的总宽度
@@ -93,6 +93,7 @@ function renderScoreModelToCanvas(scoreModel, wx2dCtx, opts = {}) {
   // 获取调号
   const keySignature = scoreModel.header.keySignatures?.[0];
   const key = keySignature ? keySignature.key : null;
+  createData(part.measures, staffId);
 
   //渲染每个小节
   for (let i = 0; i < part.measures.length; i++) {
@@ -127,16 +128,15 @@ function renderScoreModelToCanvas(scoreModel, wx2dCtx, opts = {}) {
     }
 
     // 计算当前小节的宽度（包含小节间距）
-    const currentStaveWidth = staveW + gapX;
+    // const currentStaveWidth = staveW + gapX;
+    const currentStaveWidth = m?.staveWidth + gapX;
 
     // 计算下一个小节的宽度（如果存在）
-    const nextStaveWidth = i + 1 < part.measures.length ? staveW + gapX : 0;
-
-    // 判断从第二小节开始是否超出最大行宽
-    if (
-      i > 0 &&
-      currentLineWidth + currentStaveWidth + nextStaveWidth > maxLineWidth
-    ) {
+    const nextSection = part?.measures[i + 1]?.staveWidth || 0;
+    const nextStaveWidth =
+      i + 1 < part.measures.length ? nextSection + gapX : 0;
+    const exceed = i > 0 && currentLineWidth + currentStaveWidth > maxLineWidth;
+    if (exceed) {
       // 换行：重置当前行宽度为 0
       currentLineWidth = 0;
       currentLineY += lineHeight; // 行高增加
@@ -145,7 +145,7 @@ function renderScoreModelToCanvas(scoreModel, wx2dCtx, opts = {}) {
     }
 
     // 1) 画小节线
-    const stave = new Stave(x, y, staveW);
+    const stave = new Stave(x, y, m.staveWidth - 1);
     const isFirstMeasure = m.index === 0;
 
     if (isFirstMeasure || (i > 0 && currentLineWidth === 0)) {
@@ -217,7 +217,13 @@ function renderScoreModelToCanvas(scoreModel, wx2dCtx, opts = {}) {
       beat_value: m.timeSignature[1],
     }).addTickables(tickables);
 
-    new Formatter().joinVoices([vfVoice]).format([vfVoice], staveW - 60);
+    const formatter = new Formatter().joinVoices([vfVoice]);
+    formatter.preCalculateMinTotalWidth([vfVoice]);
+    let voiceWidth = formatter.getMinTotalWidth();
+    if (isFirstMeasure) voiceWidth = currentStaveWidth - 100;
+    if (x === staveX0 && !isFirstMeasure) voiceWidth = currentStaveWidth - 60;
+    if (x !== staveX0 && !isFirstMeasure) voiceWidth = currentStaveWidth - 20;
+    formatter.format([vfVoice], voiceWidth);
 
     // 4) beams
     const vfBeams = [];
@@ -284,7 +290,7 @@ function renderScoreModelToCanvas(scoreModel, wx2dCtx, opts = {}) {
     }
 
     // 更新小节的 x 位置和当前行宽度
-    x += staveW + gapX;
+    x += currentStaveWidth + gapX;
     currentLineWidth += currentStaveWidth; // 更新当前行宽度
   }
 
@@ -351,11 +357,142 @@ onMounted(async () => {
   if (ctx.setTransform) ctx.setTransform(1, 0, 0, 1, 0, 0);
   ctx.scale(dpr, dpr);
 });
+const createData = (measures, staffId) => {
+  let scoreWidth = {};
+  for (let i = 0; i < measures.length; i++) {
+    const m = measures[i];
+    const staveWidth = getMinVoiceWidth(m, staffId, i);
+    if (staveWidth !== 0) scoreWidth[i] = staveWidth;
+  }
+  const res = layoutWidthsObject(scoreWidth, canvasSizeRef.value.width);
+  Object.keys(res).forEach((key) => {
+    measures[key].staveWidth = res[key];
+  });
+};
+/** 获取voiceWidth */
+function getMinVoiceWidth(m, staffId, i) {
+  const voiceModel = m.voices?.[staffId];
+  const StaveNote = VF.StaveNote;
+  const Voice = VF.Voice;
+  const Formatter = VF.Formatter;
+  console.log("voiceModel", voiceModel);
+  if (!voiceModel) return;
+
+  // 检查小节是否为空（仅包含休止符）
+  const hasNotes = voiceModel.events.some((ev) => ev.type !== "rest");
+
+  // 如果小节只有休止符，则跳过渲染
+  if (!hasNotes) return 0;
+  const tickables = [];
+  for (const ev of voiceModel.events) {
+    if (ev.type === "rest") {
+      tickables.push(
+        new StaveNote({
+          clef: staffId === "bass" ? "bass" : "treble",
+          keys: ["b/4"], // 占位 key
+          duration: ev.vf.duration,
+          dots: ev.vf.dots || 0,
+        })
+      );
+    }
+
+    const note = new StaveNote({
+      clef: staffId === "bass" ? "bass" : "treble",
+      keys: ev.vf.keys,
+      duration: ev.vf.duration,
+      dots: ev.vf.dots || 0,
+    });
+
+    // 临时记号
+    // if (ev.vf.accidentals) {
+    //   Object.entries(ev.vf.accidentals).forEach(([idx, acc]) => {
+    //     note.addModifier(new Accidental(acc), Number(idx));
+    //   });
+    // }
+
+    // 添加附点
+    applyDots(note, ev.vf.dots);
+
+    tickables.push(note);
+    // if (ev.id) eventNoteMap.set(ev.id, note);
+  }
+
+  // 3) Voice + 排版
+  const vfVoice = new Voice({
+    num_beats: m.timeSignature[0],
+    beat_value: m.timeSignature[1],
+  }).addTickables(tickables);
+
+  const formatter = new Formatter().joinVoices([vfVoice]);
+  formatter.preCalculateMinTotalWidth([vfVoice]);
+  // 第一小节加上表头100
+  if (i === 0) return formatter.getMinTotalWidth() + 100;
+  // 其他小节加上音符20左右间距
+  return formatter.getMinTotalWidth() + 20;
+}
+function layoutWidthsObject(widthMap, lineWidth, indent = 60) {
+  const keys = Object.keys(widthMap)
+    .map(Number)
+    .sort((a, b) => a - b);
+
+  const result = {};
+  let lineItems = []; // 当前行参与布局的 key
+  let lineSum = 0;
+  let lineIndex = 0;
+
+  function flushLine() {
+    if (lineItems.length === 0) return;
+
+    const effectiveWidth = lineIndex === 0 ? lineWidth : lineWidth - indent;
+
+    const remaining = effectiveWidth - lineSum;
+    const extra = remaining / lineItems.length;
+
+    // 均分
+    for (const k of lineItems) {
+      result[k] = widthMap[k] + extra;
+    }
+
+    // 第二行开始：indent 加到第一个非 0 元素
+    if (lineIndex > 0) {
+      result[lineItems[0]] += indent;
+    }
+
+    lineItems = [];
+    lineSum = 0;
+    lineIndex++;
+  }
+
+  for (const k of keys) {
+    const w = widthMap[k];
+
+    // width = 0：直接返回 0，不参与布局
+    if (w === 0) {
+      result[k] = 0;
+      continue;
+    }
+
+    const effectiveWidth = lineIndex === 0 ? lineWidth : lineWidth - indent;
+
+    if (lineSum + w > effectiveWidth) {
+      flushLine();
+    }
+
+    lineItems.push(k);
+    lineSum += w;
+  }
+
+  // 最后一行
+  flushLine();
+
+  return result;
+}
 </script>
 <style scoped>
 .page {
   margin-top: 10vh;
   padding: 32rpx;
+  box-sizing: border-box;
 }
 .status {
   margin-top: 24rpx;
