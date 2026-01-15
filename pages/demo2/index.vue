@@ -46,16 +46,6 @@ function getWxCanvas2D(canvasId) {
       });
   });
 }
-
-function applyDots(note, dots) {
-  const n = Number(dots) || 0;
-  if (n > 0 && note instanceof VF.StaveNote) {
-    for (let i = 0; i < n; i++) {
-      note.addModifier(new VF.Dot()); // 用 addModifier 添加附点
-    }
-  }
-}
-
 /* ===============================
  * 渲染：scoreModel -> canvas
  * =============================== */
@@ -116,6 +106,26 @@ function renderScoreModelToCanvas(scoreModel, wx2dCtx, opts = {}) {
     // 如果小节只有休止符，则跳过渲染
     if (!hasNotes) continue;
 
+    // 1) 按 “小节+有效音符序号” 上色
+    const highlightByIndex = opts.highlightByIndex || {};
+    const idxColorMap = highlightByIndex[m.index] || {}; // 当前小节的规则
+
+    // eventId -> color （只针对 note）
+    const eventIdColorMap = new Map();
+
+    // 有效音符计数（跳过 rest）
+    let noteCounter = 0;
+
+    // 注意：这里假设 voiceModel.events 已经按 startTick 排序过
+    for (const ev of voiceModel.events) {
+      if (ev.type !== "note") continue;
+
+      const c = idxColorMap[noteCounter];
+      if (c && ev.id) eventIdColorMap.set(ev.id, c);
+
+      noteCounter++;
+    }
+
     // 计算当前小节的宽度（包含小节间距）
     const currentStaveWidth = staveW + gapX;
 
@@ -154,18 +164,26 @@ function renderScoreModelToCanvas(scoreModel, wx2dCtx, opts = {}) {
 
     stave.setContext(ctx).draw();
 
+    // 用于 beam 根据 eventId 找回 event 数据
+    const eventModelMap = new Map();
+    for (const ev of voiceModel.events) {
+      if (ev.id) eventModelMap.set(ev.id, ev);
+    }
     // 2) events -> tickables
     const tickables = [];
     for (const ev of voiceModel.events) {
+      // const color = resolveHighlightColor(ev, m, hl);
+
       if (ev.type === "rest") {
-        tickables.push(
-          new StaveNote({
-            clef: staffId === "bass" ? "bass" : "treble",
-            keys: ["b/4"], // 占位 key
-            duration: ev.vf.duration,
-            dots: ev.vf.dots || 0,
-          })
-        );
+        const restNote = new StaveNote({
+          clef: staffId === "bass" ? "bass" : "treble",
+          keys: ["b/4"],
+          duration: ev.vf.duration,
+          dots: ev.vf.dots || 0,
+        });
+
+        tickables.push(restNote);
+        if (ev.id) eventNoteMap.set(ev.id, restNote);
         continue;
       }
 
@@ -183,8 +201,11 @@ function renderScoreModelToCanvas(scoreModel, wx2dCtx, opts = {}) {
         });
       }
 
-      // 添加附点
-      applyDots(note, ev.vf.dots);
+      // 按 “小节+有效音符序号” 的配置上色
+      const color = ev.id ? eventIdColorMap.get(ev.id) : null;
+      if (color && typeof note.setStyle === "function") {
+        note.setStyle({ strokeStyle: color, fillStyle: color });
+      }
 
       tickables.push(note);
       if (ev.id) eventNoteMap.set(ev.id, note);
@@ -201,18 +222,34 @@ function renderScoreModelToCanvas(scoreModel, wx2dCtx, opts = {}) {
     // 4) beams
     const vfBeams = [];
     for (const b of voiceModel.beams || []) {
-      const notesForBeam = (b.eventIds || [])
+      const ids = b.eventIds || [];
+      const notesForBeam = ids
         .map((id) => eventNoteMap.get(id))
         .filter(Boolean);
 
       if (notesForBeam.length >= 2) {
-        vfBeams.push(new Beam(notesForBeam));
+        const beam = new Beam(notesForBeam);
+
+        const ids = b.eventIds || [];
+        const colors = ids.map((id) => eventIdColorMap.get(id)).filter(Boolean);
+        const beamColor = colors.length ? colors[0] : null;
+
+        // 如果这一组都同色才染色
+        const same =
+          colors.length === ids.length && colors.every((x) => x === colors[0]);
+
+        if (same && beamColor && typeof beam.setStyle === "function") {
+          beam.setStyle({ strokeStyle: beamColor, fillStyle: beamColor });
+        }
+
+        vfBeams.push(beam);
       }
     }
 
+    // 先画音符
     vfVoice.draw(ctx, stave);
 
-    // 绘制横梁
+    // 再画 beams
     for (const beam of vfBeams) {
       beam.setContext(ctx).draw();
     }
@@ -282,6 +319,11 @@ async function onSelectMidi() {
       staff: "treble",
       measureWidth: 220,
       gapX: 0, //小节空隙
+      highlightByIndex: {
+        // 小节 index -> (有效音符序号 -> 颜色)
+        0: { 0: "#1f5eff", 1: "#1f5eff", 2: "#1f5eff" }, // 第0小节的第0/1/2个有效音符
+        3: { 0: "#ff3b30", 1: "#ff3b30", 2: "#ff3b30", 3: "#ff3b30" }, // 第3小节的第1/2个有效音符染红
+      },
     });
   } catch (e) {
     console.error("❌ MIDI 加载失败", e);
