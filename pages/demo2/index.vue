@@ -46,6 +46,15 @@ function getWxCanvas2D(canvasId) {
       });
   });
 }
+
+function applyDots(note, dots) {
+  const n = Number(dots) || 0;
+  if (n > 0 && note instanceof VF.StaveNote) {
+    for (let i = 0; i < n; i++) {
+      note.addModifier(new VF.Dot()); // 用 addModifier 添加附点
+    }
+  }
+}
 /* ===============================
  * 渲染：scoreModel -> canvas
  * =============================== */
@@ -207,6 +216,9 @@ function renderScoreModelToCanvas(scoreModel, wx2dCtx, opts = {}) {
         note.setStyle({ strokeStyle: color, fillStyle: color });
       }
 
+      // 添加附点
+      applyDots(note, ev.vf.dots);
+
       tickables.push(note);
       if (ev.id) eventNoteMap.set(ev.id, note);
     }
@@ -327,7 +339,7 @@ async function onSelectMidi() {
       gapX: 0, //小节空隙
       highlightByIndex: {
         // 小节 index -> (有效音符序号 -> 颜色)
-        0: { 0: "#1f5eff", 1: "#1f5eff", 2: "#1f5eff" }, // 第0小节的第0/1/2个有效音符
+        1: { 0: "#1f5eff", 1: "#1f5eff", 2: "#1f5eff" }, // 第0小节的第0/1/2个有效音符
         3: { 0: "#ff3b30", 1: "#ff3b30", 2: "#ff3b30", 3: "#ff3b30" }, // 第3小节的第1/2个有效音符染红
       },
     });
