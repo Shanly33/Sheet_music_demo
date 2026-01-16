@@ -194,7 +194,7 @@ function renderScoreModelToCanvas(scoreModel, wx2dCtx, opts = {}) {
     const currentStaveWidth = m?.staveWidth + gapX;
 
     // 计算下一个小节的宽度（如果存在）
-    const exceed = i > 0 && currentLineWidth + currentStaveWidth > maxLineWidth;
+    const exceed = i > 0 && Math.floor(currentLineWidth + currentStaveWidth) > maxLineWidth;
     if (exceed) {
       // 换行：重置当前行宽度为 0
       currentLineWidth = 0;
@@ -409,7 +409,7 @@ onMounted(async () => {
   canvasRef.value = canvas;
   wxCtxRef.value = ctx;
   canvasSizeRef.value = { width, height };
-
+  canvasOriginalSizeRef.value={width, height}
   // DPR 处理：注意每次设置 width/height 会重置 transform，所以要在设置后 scale
   const dpr = uni.getSystemInfoSync().pixelRatio || 1;
   dprRef.value = dpr;
@@ -493,11 +493,15 @@ function getMinVoiceWidth(m, staffId, i) {
 
   const formatter = new Formatter().joinVoices([vfVoice]);
   formatter.preCalculateMinTotalWidth([vfVoice]);
+  // console.log("每个小节宽度", formatter.getMinTotalWidth());
+  let setcionWidth= formatter.getMinTotalWidth()
   // 第一小节加上表头100
-  if (i === 0) return formatter.getMinTotalWidth() + 100;
+  if (i === 0) setcionWidth += 100;
   // 其他小节加上音符20左右间距
-  return formatter.getMinTotalWidth() + 20;
+  setcionWidth+= 20;
+  return setcionWidth>100?setcionWidth:100
 }
+
 function layoutWidthsObject(widthMap, lineWidth, indent = 60) {
   const keys = Object.keys(widthMap)
     .map(Number)
