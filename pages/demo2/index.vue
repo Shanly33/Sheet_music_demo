@@ -110,7 +110,7 @@ function renderScoreModelToCanvas(scoreModel, wx2dCtx, opts = {}) {
   const Tuplet = VF.Tuplet;
   const StaveTie = VF.StaveTie;
   const Accidental = VF.Accidental;
-
+  const Barline = VF.Barline;
   // 新增：渲染前先重置Canvas缩放状态（核心修复）
   resetCanvasScale();
 
@@ -218,7 +218,7 @@ function renderScoreModelToCanvas(scoreModel, wx2dCtx, opts = {}) {
       }
     } else {
       // 中间小节不画左边竖线
-      // if (Barline?.type) stave.setBegBarType(Barline.type.NONE);
+      if (Barline?.type&&x!==staveX0) stave.setBegBarType(Barline.type.NONE);
     }
 
     stave.setContext(ctx).draw();
