@@ -512,9 +512,9 @@ function layoutWidthsObject(widthMap, lineWidth, indent = 60) {
   let lineSum = 0;
   let lineIndex = 0;
 
-  function flushLine() {
+  function flushLine(isLast) {
+    
     if (lineItems.length === 0) return;
-
     const effectiveWidth = lineIndex === 0 ? lineWidth : lineWidth - indent;
 
     const remaining = effectiveWidth - lineSum;
@@ -522,7 +522,8 @@ function layoutWidthsObject(widthMap, lineWidth, indent = 60) {
 
     // 均分
     for (const k of lineItems) {
-      result[k] = widthMap[k] + extra;
+      // isLast最后一行就不用占满
+      result[k] =isLast? widthMap[k] : widthMap[k] + extra;
     }
 
     // 第二行开始：indent 加到第一个非 0 元素
@@ -555,7 +556,7 @@ function layoutWidthsObject(widthMap, lineWidth, indent = 60) {
   }
 
   // 最后一行
-  flushLine();
+  flushLine('last');
 
   return result;
 }
