@@ -37,6 +37,9 @@ import Vex from "vexflow";
 const VF = Vex.Flow;
 const instance = getCurrentInstance();
 
+const MIN_NOTE_GAP = 28; // 音符最小水平间距（像素）
+const MAX_TRY_STEPS = 40; // 最多向两边尝试多少个槽位
+
 let canvasTop = 0;
 let canvasLeft = 0;
 
@@ -146,9 +149,48 @@ function canvasXToLayoutX(canvasX) {
   return canvasX - getNoteStartX();
 }
 
-// VexFlow 布局 x -> canvas 绝对 x
-function layoutXToCanvasX(layoutX) {
-  return layoutX + getNoteStartX();
+function getDrawableXRange() {
+  // 这里用谱表可写区范围更合理（避免画到谱号拍号上）
+  const minX = scoreStave?.getNoteStartX?.() ?? 0;
+  const maxX =
+    (scoreStave?.getX?.() ?? 0) + (scoreStave?.getWidth?.() ?? cssW) - 10;
+  return { minX, maxX };
+}
+
+function isXFree(xCanvas) {
+  for (const n of notes.value) {
+    const xn = n.xCanvas ?? n.x; // 兼容旧字段
+    if (typeof xn !== "number") continue;
+    if (Math.abs(xCanvas - xn) < gapForDuration(selected.value.duration))
+      return false;
+  }
+  return true;
+}
+
+/**
+ * 输入：用户点击的 xCanvas（canvas 绝对坐标）
+ * 输出：一个“附近不重叠”的 xCanvas（尽量贴近原点）
+ */
+function placeXAvoidOverlap(xCanvasRaw) {
+  const { minX, maxX } = getDrawableXRange();
+
+  // 先 clamp 到可写区
+  let x0 = Math.max(minX, Math.min(maxX, xCanvasRaw));
+
+  // 如果当前位置不冲突，直接用
+  if (isXFree(x0)) return x0;
+
+  // 否则以 MIN_NOTE_GAP 为步长，左右交替找最近空位
+  for (let k = 1; k <= MAX_TRY_STEPS; k++) {
+    const xr = x0 + k * gapForDuration(selected.value.duration);
+    if (xr <= maxX && isXFree(xr)) return xr;
+
+    const xl = x0 - k * gapForDuration(selected.value.duration);
+    if (xl >= minX && isXFree(xl)) return xl;
+  }
+
+  // 实在找不到就返回 clamp 后的值（兜底）
+  return x0;
 }
 
 /**
@@ -354,6 +396,11 @@ function redrawScore() {
   // console.log("final canvasX", layoutXToCanvasX(n.layoutXFinal));
 }
 
+function gapForDuration(dur) {
+  const map = { w: 30, h: 24, q: 20, 8: 18, 16: 18, 32: 18, 64: 18 };
+  return map[dur] ?? 28;
+}
+
 //获取canvas坐标
 
 function getCanvasPoint(e) {
@@ -392,9 +439,10 @@ function onScoreTap(e) {
   const maxX = scoreStave.getX() + scoreStave.getWidth() - 10;
   const x = Math.max(minX, Math.min(maxX, p.x));
   console.log("点击了", x, minX, maxX, p.x);
+  const xPlaced = placeXAvoidOverlap(x);
 
   notes.value.push({
-    xCanvas: x,
+    xCanvas: xPlaced,
     key,
     duration: selected.value.duration,
   });
