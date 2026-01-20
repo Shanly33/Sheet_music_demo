@@ -136,6 +136,21 @@ function yToKey_Treble(y) {
   return diatonicStepToKeyFromE4(step);
 }
 
+//获取音符开始时间
+function getNoteStartX() {
+  return scoreStave?.getNoteStartX?.() ?? 0;
+}
+
+// canvas 绝对 x -> VexFlow 布局 x（以 noteStartX 为 0）
+function canvasXToLayoutX(canvasX) {
+  return canvasX - getNoteStartX();
+}
+
+// VexFlow 布局 x -> canvas 绝对 x
+function layoutXToCanvasX(layoutX) {
+  return layoutX + getNoteStartX();
+}
+
 /**
  * 从 E4 开始按自然音阶（不带升降号）走 step 步，返回 vexflow key 格式：比如 "c/5"
  */
@@ -263,32 +278,80 @@ function initDurationIcons() {
 function redrawScore() {
   if (!scoreRenderer || !scoreCtx) return;
 
-  // 清屏（注意我们已经 scale 过，所以用 css 尺寸清）
+  // 清屏
   scoreCtx.clearRect(0, 0, cssW, cssH);
-
   const context = scoreRenderer.getContext();
 
-  // 五线谱
+  // 画谱表
   scoreStave = new VF.Stave(10, 40, cssW - 20);
   scoreStave.addClef("treble").addTimeSignature("4/4");
   scoreStave.setContext(context).draw();
 
   if (notes.value.length === 0) return;
 
-  const tickables = notes.value.map((n) => {
-    return new VF.StaveNote({
+  // 按 xCanvas 排序（可选）
+  const list = [...notes.value].sort(
+    (a, b) => (a.xCanvas ?? a.x) - (b.xCanvas ?? b.x)
+  );
+
+  // ------------ 第一遍：测量每个音符需要的“中心对齐补偿” ------------
+  const measured = [];
+
+  list.forEach((n) => {
+    const xCanvas = n.xCanvas ?? n.x;
+    if (typeof xCanvas !== "number" || Number.isNaN(xCanvas)) return;
+
+    const layoutX = canvasXToLayoutX(xCanvas);
+
+    const note = new VF.StaveNote({
       clef: "treble",
       keys: [n.key],
       duration: n.duration,
     });
+    note.setStave(scoreStave);
+    note.setContext(context);
+
+    const tc = new VF.TickContext();
+    tc.addTickable(note);
+    tc.preFormat();
+    tc.setX(layoutX);
+
+    note.draw();
+
+    const bb = note.getBoundingBox?.();
+    if (bb) {
+      const centerCanvasX = bb.getX() + bb.getW() / 2;
+      const dxCanvas = xCanvas - centerCanvasX;
+      measured.push({ ...n, layoutXFinal: layoutX + dxCanvas });
+    } else {
+      measured.push({ ...n, layoutXFinal: layoutX });
+    }
   });
 
-  const voice = new VF.Voice({ num_beats: 4, beat_value: 4 });
-  voice.setStrict(false);
-  voice.addTickables(tickables);
+  // ------------ 第二遍：清屏重画谱表 + 按补偿后的 layoutXFinal 正式画 ------------
+  scoreCtx.clearRect(0, 0, cssW, cssH);
+  scoreStave.setContext(context).draw();
 
-  new VF.Formatter().joinVoices([voice]).format([voice], cssW - 60);
-  voice.draw(context, scoreStave);
+  measured.forEach((n) => {
+    const note = new VF.StaveNote({
+      clef: "treble",
+      keys: [n.key],
+      duration: n.duration,
+    });
+    note.setStave(scoreStave);
+    note.setContext(context);
+
+    const tc = new VF.TickContext();
+    tc.addTickable(note);
+    tc.preFormat();
+
+    // 最终位置：中心对齐后的 layoutX
+    tc.setX(n.layoutXFinal);
+    note.draw();
+  });
+
+  // （可选调试）你要看最终落在 canvas 的 x，可以反推：
+  // console.log("final canvasX", layoutXToCanvasX(n.layoutXFinal));
 }
 
 //获取canvas坐标
@@ -299,6 +362,7 @@ function getCanvasPoint(e) {
   // 尽量拿页面/视口坐标（不同端字段不同）
   let x = e.detail?.x ?? t?.x ?? t?.clientX ?? t?.pageX;
   let y = e.detail?.y ?? t?.y ?? t?.clientY ?? t?.pageY;
+  console.log("页面x", e.detail?.x ?? t?.x ?? t?.clientX ?? t?.pageX);
 
   if (typeof x !== "number" || typeof y !== "number") return null;
 
@@ -315,14 +379,22 @@ function getCanvasPoint(e) {
 
 // =============== 用户点主谱面：y 决定音高 + 当前选中 duration 决定时值 ===============
 function onScoreTap(e) {
-  if (!selected.value) return;
+  if (!selected.value || !scoreStave) return;
 
   const p = getCanvasPoint(e);
   if (!p) return;
 
+  // y → 音高（线/间吸附）
   const key = yToKey_Treble(p.y);
 
+  // x → 限制在可写区域（避开谱号/拍号）
+  const minX = scoreStave.getNoteStartX?.() ?? 60;
+  const maxX = scoreStave.getX() + scoreStave.getWidth() - 10;
+  const x = Math.max(minX, Math.min(maxX, p.x));
+  console.log("点击了", x, minX, maxX, p.x);
+
   notes.value.push({
+    xCanvas: x,
     key,
     duration: selected.value.duration,
   });
