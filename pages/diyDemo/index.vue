@@ -37,7 +37,7 @@ import Vex from "vexflow";
 const VF = Vex.Flow;
 const instance = getCurrentInstance();
 
-const MIN_NOTE_GAP = 28; // 音符最小水平间距（像素）
+const MIN_NOTE_GAP = 18; // 音符最小水平间距（像素）
 const MAX_TRY_STEPS = 40; // 最多向两边尝试多少个槽位
 
 let canvasTop = 0;
@@ -150,21 +150,19 @@ function canvasXToLayoutX(canvasX) {
 }
 
 function getDrawableXRange() {
-  // 这里用谱表可写区范围更合理（避免画到谱号拍号上）
   const minX = scoreStave?.getNoteStartX?.() ?? 0;
   const maxX =
     (scoreStave?.getX?.() ?? 0) + (scoreStave?.getWidth?.() ?? cssW) - 10;
   return { minX, maxX };
 }
 
-function isXFree(xCanvas) {
+function isCollidingAtX(xCanvas) {
   for (const n of notes.value) {
     const xn = n.xCanvas ?? n.x; // 兼容旧字段
     if (typeof xn !== "number") continue;
-    if (Math.abs(xCanvas - xn) < gapForDuration(selected.value.duration))
-      return false;
+    if (Math.abs(xCanvas - xn) < MIN_NOTE_GAP) return true;
   }
-  return true;
+  return false;
 }
 
 /**
@@ -439,10 +437,19 @@ function onScoreTap(e) {
   const maxX = scoreStave.getX() + scoreStave.getWidth() - 10;
   const x = Math.max(minX, Math.min(maxX, p.x));
   console.log("点击了", x, minX, maxX, p.x);
-  const xPlaced = placeXAvoidOverlap(x);
+  // const xPlaced = placeXAvoidOverlap(x);
+  // === 碰撞检测：冲突就提示，不自动挪位置 ===
+  if (isCollidingAtX(x)) {
+    uni.showToast({
+      title: `离已有音符太近，请重新选择位置`,
+      icon: "none",
+      duration: 1200,
+    });
+    return;
+  }
 
   notes.value.push({
-    xCanvas: xPlaced,
+    xCanvas: x,
     key,
     duration: selected.value.duration,
   });
