@@ -4,7 +4,7 @@
     <canvas
       id="scoreCanvas"
       type="2d"
-      style="width: 100%; height: 800px"
+      style="width: 100%; height: 500px"
     ></canvas>
   </view>
 </template>
@@ -194,7 +194,8 @@ function renderScoreModelToCanvas(scoreModel, wx2dCtx, opts = {}) {
     const currentStaveWidth = m?.staveWidth + gapX;
 
     // 计算下一个小节的宽度（如果存在）
-    const exceed = i > 0 && Math.floor(currentLineWidth + currentStaveWidth) > maxLineWidth;
+    const exceed =
+      i > 0 && Math.floor(currentLineWidth + currentStaveWidth) > maxLineWidth;
     if (exceed) {
       // 换行：重置当前行宽度为 0
       currentLineWidth = 0;
@@ -218,7 +219,8 @@ function renderScoreModelToCanvas(scoreModel, wx2dCtx, opts = {}) {
       }
     } else {
       // 中间小节不画左边竖线
-      if (Barline?.type&&x!==staveX0) stave.setBegBarType(Barline.type.NONE);
+      if (Barline?.type && x !== staveX0)
+        stave.setBegBarType(Barline.type.NONE);
     }
 
     stave.setContext(ctx).draw();
@@ -409,7 +411,7 @@ onMounted(async () => {
   canvasRef.value = canvas;
   wxCtxRef.value = ctx;
   canvasSizeRef.value = { width, height };
-  canvasOriginalSizeRef.value={width, height}
+  canvasOriginalSizeRef.value = { width, height };
   // DPR 处理：注意每次设置 width/height 会重置 transform，所以要在设置后 scale
   const dpr = uni.getSystemInfoSync().pixelRatio || 1;
   dprRef.value = dpr;
@@ -494,12 +496,12 @@ function getMinVoiceWidth(m, staffId, i) {
   const formatter = new Formatter().joinVoices([vfVoice]);
   formatter.preCalculateMinTotalWidth([vfVoice]);
   // console.log("每个小节宽度", formatter.getMinTotalWidth());
-  let setcionWidth= formatter.getMinTotalWidth()
+  let setcionWidth = formatter.getMinTotalWidth();
   // 第一小节加上表头100
   if (i === 0) setcionWidth += 100;
   // 其他小节加上音符20左右间距
-  setcionWidth+= 20;
-  return setcionWidth>100?setcionWidth:100
+  setcionWidth += 20;
+  return setcionWidth > 100 ? setcionWidth : 100;
 }
 
 function layoutWidthsObject(widthMap, lineWidth, indent = 60) {
@@ -513,7 +515,6 @@ function layoutWidthsObject(widthMap, lineWidth, indent = 60) {
   let lineIndex = 0;
 
   function flushLine(isLast) {
-    
     if (lineItems.length === 0) return;
     const effectiveWidth = lineIndex === 0 ? lineWidth : lineWidth - indent;
 
@@ -523,7 +524,7 @@ function layoutWidthsObject(widthMap, lineWidth, indent = 60) {
     // 均分
     for (const k of lineItems) {
       // isLast最后一行就不用占满
-      result[k] =isLast? widthMap[k] : widthMap[k] + extra;
+      result[k] = isLast ? widthMap[k] : widthMap[k] + extra;
     }
 
     // 第二行开始：indent 加到第一个非 0 元素
@@ -556,7 +557,7 @@ function layoutWidthsObject(widthMap, lineWidth, indent = 60) {
   }
 
   // 最后一行
-  flushLine('last');
+  flushLine("last");
 
   return result;
 }
