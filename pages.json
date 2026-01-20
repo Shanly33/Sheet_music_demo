@@ -4,11 +4,32 @@
     {
       "path": "pages/demo2/index",
       "style": {
-        "navigationBarTitleText": "试唱练习助手",
+        "navigationBarTitleText": "渲染",
+        "navigationStyle": "custom"
+      }
+    },
+    {
+      "path": "pages/diyDemo/index",
+      "style": {
+        "navigationBarTitleText": "自定义",
         "navigationStyle": "custom"
       }
     }
   ],
+  "tabBar": {
+    "color": "#999",
+    "selectedColor": "#2979ff",
+    "list": [
+      {
+        "pagePath": "pages/demo2/index",
+        "text": "渲染"
+      },
+      {
+        "pagePath": "pages/diyDemo/index",
+        "text": "自定义"
+      }
+    ]
+  },
   "globalStyle": {
     "navigationBarTextStyle": "black",
     "navigationBarTitleText": "uni-app",
