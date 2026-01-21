@@ -9,6 +9,56 @@
       @tap="onScoreTap"
     />
 
+    <view class="opt-bar">
+      <view class="opt-title">谱号</view>
+      <view class="opt-row">
+        <view
+          class="opt-btn"
+          :class="{ active: scoreConfig.clef === 'treble' }"
+          @tap="setClef('treble')"
+          >高音谱号</view
+        >
+        <view
+          class="opt-btn"
+          :class="{ active: scoreConfig.clef === 'bass' }"
+          @tap="setClef('bass')"
+          >低音谱号</view
+        >
+      </view>
+    </view>
+
+    <!-- 调号 -->
+    <view class="opt-bar">
+      <view class="opt-title">调号</view>
+      <view class="opt-row">
+        <view
+          v-for="k in keySigOptions"
+          :key="k.value"
+          class="opt-btn"
+          :class="{ active: scoreConfig.keySig === k.value }"
+          @tap="selectKeySig(k.value)"
+        >
+          {{ k.label }}
+        </view>
+      </view>
+    </view>
+
+    <!-- 拍号 -->
+    <view class="opt-bar">
+      <view class="opt-title">拍号</view>
+      <view class="opt-row">
+        <view
+          v-for="t in timeSigOptions"
+          :key="t.value"
+          class="opt-btn"
+          :class="{ active: scoreConfig.timeSig === t.value }"
+          @tap="selectTimeSig(t.value)"
+        >
+          {{ t.label }}
+        </view>
+      </view>
+    </view>
+
     <!-- 底部：音符时值选择（图标用 VexFlow 画） -->
     <view class="note-bar">
       <view
@@ -19,11 +69,51 @@
         @tap="selectDuration(d)"
       >
         <image class="note-icon" :src="d.icon" mode="aspectFit" />
-        <view class="note-label">{{ d.label }}</view>
       </view>
 
       <view class="note-btn danger" @tap="clearAll">
         <view class="danger-text">清空</view>
+      </view>
+    </view>
+
+    <!-- 临时记号选择 -->
+    <view class="opt-bar">
+      <view class="opt-title">临时记号</view>
+      <view class="opt-row">
+        <view
+          v-for="a in accidentals"
+          :key="a.id"
+          class="opt-btn"
+          :class="{ active: selectedAccidental === a.value }"
+          @tap="selectAccidental(a.value)"
+        >
+          {{ a.label }}
+        </view>
+      </view>
+    </view>
+
+    <!-- 附点选择 -->
+    <view class="opt-bar">
+      <view class="opt-title">附点</view>
+      <view class="opt-row">
+        <view
+          class="opt-btn"
+          :class="{ active: selectedDots === 0 }"
+          @tap="selectDots(0)"
+          >0</view
+        >
+        <view
+          class="opt-btn"
+          :class="{ active: selectedDots === 1 }"
+          @tap="selectDots(1)"
+          >1</view
+        >
+        <!-- <view
+          class="opt-btn"
+          :class="{ active: selectedDots === 2 }"
+          @tap="selectDots(2)"
+          >2</view
+        > -->
       </view>
     </view>
   </view>
@@ -93,10 +183,78 @@ const durations = [
   },
 ];
 
+// 临时记号
+const accidentals = [
+  { id: "none", label: "无", value: null },
+  { id: "#", label: "♯", value: "#" },
+  { id: "b", label: "♭", value: "b" },
+  { id: "n", label: "♮", value: "n" },
+  { id: "##", label: "𝄪", value: "##" },
+  { id: "bb", label: "𝄫", value: "bb" },
+];
+
+const timeSigOptions = [
+  { label: "2/4", value: "2/4" },
+  { label: "3/4", value: "3/4" },
+  { label: "4/4", value: "4/4" },
+  { label: "6/8", value: "6/8" },
+  { label: "12/8", value: "12/8" },
+];
+
+// 常见调号（大调写法），够用
+const keySigOptions = [
+  { label: "C (0)", value: "C" },
+  { label: "G (1#)", value: "G" },
+  { label: "D (2#)", value: "D" },
+  { label: "A (3#)", value: "A" },
+  { label: "E (4#)", value: "E" },
+  { label: "B (5#)", value: "B" },
+  { label: "F# (6#)", value: "F#" },
+  { label: "C# (7#)", value: "C#" },
+  { label: "F (1b)", value: "F" },
+  { label: "Bb (2b)", value: "Bb" },
+  { label: "Eb (3b)", value: "Eb" },
+  { label: "Ab (4b)", value: "Ab" },
+  { label: "Db (5b)", value: "Db" },
+  { label: "Gb (6b)", value: "Gb" },
+  { label: "Cb (7b)", value: "Cb" },
+];
+
+const scoreConfig = ref({
+  clef: "treble", // 你现在固定也行；后面再扩展 treble/bass
+  timeSig: "4/4",
+  keySig: "C",
+});
+
+// 升号、降号的固定顺序（乐理规则）
+const SHARP_ORDER = ["f", "c", "g", "d", "a", "e", "b"];
+const FLAT_ORDER = ["b", "e", "a", "d", "g", "c", "f"];
+// 常见大调调号：有几个升/降
+const KEY_SIG_ACC_COUNT = {
+  C: { type: "sharp", count: 0 },
+  G: { type: "sharp", count: 1 },
+  D: { type: "sharp", count: 2 },
+  A: { type: "sharp", count: 3 },
+  E: { type: "sharp", count: 4 },
+  B: { type: "sharp", count: 5 },
+  "F#": { type: "sharp", count: 6 },
+  "C#": { type: "sharp", count: 7 },
+
+  F: { type: "flat", count: 1 },
+  Bb: { type: "flat", count: 2 },
+  Eb: { type: "flat", count: 3 },
+  Ab: { type: "flat", count: 4 },
+  Db: { type: "flat", count: 5 },
+  Gb: { type: "flat", count: 6 },
+  Cb: { type: "flat", count: 7 },
+};
+
 const selected = ref(durations[2]); // 默认四分音符
 
 // 记录已放入谱面的音符：{ key: "e/4", duration: "q" }
 const notes = ref([]);
+const selectedAccidental = ref(null); // null | "#" | "b" | "n"
+const selectedDots = ref(0); // 0 | 1 | 2
 
 // 主谱面 canvas & vexflow 对象
 let scoreNode = null;
@@ -115,6 +273,61 @@ function selectDuration(d) {
 function clearAll() {
   notes.value = [];
   redrawScore();
+}
+
+function selectAccidental(a) {
+  selectedAccidental.value = a; // a: null | "#" | "b" | "n"
+}
+
+function selectDots(k) {
+  selectedDots.value = k; // 0|1
+}
+
+function setClef(clef) {
+  scoreConfig.value.clef = clef;
+  redrawScore();
+}
+
+function selectTimeSig(v) {
+  scoreConfig.value.timeSig = v;
+  redrawScore();
+}
+
+function selectKeySig(v) {
+  scoreConfig.value.keySig = v;
+  redrawScore();
+}
+
+/**
+ * 根据当前调号，返回一个映射：{ f: "#", c: "#", ... } 或 { b:"b", e:"b", ...}
+ */
+function getKeySigAccidentalMap(keySig) {
+  const info = KEY_SIG_ACC_COUNT[keySig] || KEY_SIG_ACC_COUNT.C;
+  const map = {};
+
+  if (info.count <= 0) return map;
+
+  if (info.type === "sharp") {
+    for (let i = 0; i < info.count; i++) map[SHARP_ORDER[i]] = "#";
+  } else {
+    for (let i = 0; i < info.count; i++) map[FLAT_ORDER[i]] = "b";
+  }
+  return map;
+}
+
+/**
+ * 把一个自然音 key（例如 "f/4"）按调号变成默认音高（例如 D大调 => "f#/4"）
+ * 注意：这里只改变 key 字符串，不添加临时记号（因为调号已显示）
+ */
+function applyKeySigToKey(naturalKey, keySig) {
+  const accMap = getKeySigAccidentalMap(keySig);
+
+  const [letterRaw, octaveRaw] = String(naturalKey).split("/");
+  const letter = (letterRaw || "c").toLowerCase();
+  const octave = octaveRaw || "4";
+
+  const acc = accMap[letter]; // "#" 或 "b" 或 undefined
+  return acc ? `${letter}${acc}/${octave}` : `${letter}/${octave}`;
 }
 
 // =============== 核心：y -> 音高 key（treble，按线/间吸附） ===============
@@ -137,6 +350,25 @@ function yToKey_Treble(y) {
   step = Math.max(-10, Math.min(14, step));
 
   return diatonicStepToKeyFromE4(step);
+}
+
+function yToKey(y) {
+  if (!scoreStave) return "c/4";
+
+  const spacing = scoreStave.getSpacingBetweenLines();
+  const stepSize = spacing / 2;
+  const bottomLineY = scoreStave.getYForLine(4);
+
+  let step = Math.round((bottomLineY - y) / stepSize);
+
+  // 你原来的范围限制可以保留；bass 可以稍微放宽/下移也行
+  step = Math.max(-10, Math.min(14, step));
+
+  // 根据谱号选择“底线是什么音”
+  const clef = scoreConfig.value.clef;
+  const baseKey = clef === "bass" ? "g/2" : "e/4"; // ✅ treble 底线E4，bass 底线G2
+
+  return diatonicStepToKeyFromBase(step, baseKey);
 }
 
 //获取音符开始时间
@@ -192,33 +424,31 @@ function placeXAvoidOverlap(xCanvasRaw) {
 }
 
 /**
- * 从 E4 开始按自然音阶（不带升降号）走 step 步，返回 vexflow key 格式：比如 "c/5"
+ * 按自然音阶（不带升降号）走 step 步，返回 vexflow key 格式：比如 "c/5"
  */
-function diatonicStepToKeyFromE4(step) {
+function diatonicStepToKeyFromBase(step, baseKey) {
   const letters = ["c", "d", "e", "f", "g", "a", "b"];
-  // E 在 letters 里是 index=2
-  let letterIndex = 2;
-  let octave = 4;
 
-  // 往上
+  const [baseLetter, baseOct] = baseKey.split("/");
+  let letterIndex = letters.indexOf(baseLetter);
+  let octave = Number(baseOct);
+
+  if (letterIndex < 0 || Number.isNaN(octave)) return "c/4";
+
   if (step > 0) {
     for (let i = 0; i < step; i++) {
-      // 下一音名
       letterIndex += 1;
       if (letterIndex >= 7) {
-        letterIndex = 0; // 回到 c
-        octave += 1; // b -> c 需要进一个八度
+        letterIndex = 0;
+        octave += 1; // b -> c 进八度
       }
     }
-  }
-
-  // 往下
-  if (step < 0) {
+  } else if (step < 0) {
     for (let i = 0; i < Math.abs(step); i++) {
       letterIndex -= 1;
       if (letterIndex < 0) {
-        letterIndex = 6; // 回到 b
-        octave -= 1; // c -> b 需要退一个八度
+        letterIndex = 6;
+        octave -= 1; // c -> b 退八度
       }
     }
   }
@@ -229,7 +459,6 @@ function diatonicStepToKeyFromE4(step) {
 // =============== 初始化：主谱面 + 底部图标 canvas ===============
 onReady(() => {
   initScoreCanvas();
-  initDurationIcons();
 });
 
 function initScoreCanvas() {
@@ -266,52 +495,41 @@ function initScoreCanvas() {
   });
 }
 
-function initDurationIcons() {
-  // 每个小图标 canvas 单独渲染一个“该时值的音符”
-  durations.forEach((d) => {
-    const id = `#icon_${d.id}`;
-    const q = uni.createSelectorQuery().in(instance);
-    q.select(id)
-      .fields({ node: true, size: true })
-      .exec((res) => {
-        const info = res?.[0];
-        if (!info?.node) return;
-
-        const node = info.node;
-        const w = info.width;
-        const h = info.height;
-
-        const localDpr = uni.getSystemInfoSync().pixelRatio || 1;
-        node.width = Math.floor(w * localDpr);
-        node.height = Math.floor(h * localDpr);
-
-        const ctx = node.getContext("2d");
-        ctx.scale(localDpr, localDpr);
-
-        const r = new VF.Renderer(node, VF.Renderer.Backends.CANVAS);
-        const context = r.getContext();
-
-        // 清屏
-        ctx.clearRect(0, 0, w, h);
-
-        // 画一个很短的小谱表，放一个固定音高 c/4 的音符作为图标
-        const stave = new VF.Stave(2, 8, w - 4);
-        stave.setContext(context).draw();
-
-        const note = new VF.StaveNote({
-          clef: "treble",
-          keys: ["c/4"],
-          duration: d.duration,
-        });
-
-        const voice = new VF.Voice({ num_beats: 4, beat_value: 4 });
-        voice.setStrict(false);
-        voice.addTickables([note]);
-
-        new VF.Formatter().joinVoices([voice]).format([voice], w - 20);
-        voice.draw(context, stave);
-      });
+function buildStaveNote(n, context) {
+  const dots = n.dots ?? 0;
+  const note = new VF.StaveNote({
+    clef: "treble",
+    keys: [n.key],
+    duration: n.duration, // 仍然是 "q" / "8" / "16"...
+    dots: dots, // 关键：ticks 由 dots 决定
   });
+
+  note.setStave(scoreStave);
+  note.setContext(context);
+
+  // 临时记号
+  if (n.accidental) {
+    note.addModifier(new VF.Accidental(n.accidental), 0);
+  }
+
+  if (dots > 0) {
+    // 先保证 note 自己知道有几个点（你已经在构造里 dots: dots 了）
+    // 然后让 VexFlow 用官方方法把点“正确地”挂上去并排版
+    VF.Dot.buildAndAttach([note], { all: true });
+  }
+
+  return note;
+}
+
+function drawStave(context) {
+  scoreStave = new VF.Stave(10, 40, cssW - 20);
+
+  const { clef, timeSig, keySig } = scoreConfig.value;
+  if (clef) scoreStave.addClef(clef);
+  if (timeSig) scoreStave.addTimeSignature(timeSig);
+  if (keySig) scoreStave.addKeySignature(keySig);
+
+  scoreStave.setContext(context).draw();
 }
 
 // =============== 重绘主谱面（每次点击都全量重绘，MVP 最稳） ===============
@@ -323,9 +541,7 @@ function redrawScore() {
   const context = scoreRenderer.getContext();
 
   // 画谱表
-  scoreStave = new VF.Stave(10, 40, cssW - 20);
-  scoreStave.addClef("treble").addTimeSignature("4/4");
-  scoreStave.setContext(context).draw();
+  drawStave(context);
 
   if (notes.value.length === 0) return;
 
@@ -343,11 +559,8 @@ function redrawScore() {
 
     const layoutX = canvasXToLayoutX(xCanvas);
 
-    const note = new VF.StaveNote({
-      clef: "treble",
-      keys: [n.key],
-      duration: n.duration,
-    });
+    const note = buildStaveNote(n, context);
+
     note.setStave(scoreStave);
     note.setContext(context);
 
@@ -373,11 +586,8 @@ function redrawScore() {
   scoreStave.setContext(context).draw();
 
   measured.forEach((n) => {
-    const note = new VF.StaveNote({
-      clef: "treble",
-      keys: [n.key],
-      duration: n.duration,
-    });
+    const note = buildStaveNote(n, context);
+
     note.setStave(scoreStave);
     note.setContext(context);
 
@@ -389,9 +599,6 @@ function redrawScore() {
     tc.setX(n.layoutXFinal);
     note.draw();
   });
-
-  // （可选调试）你要看最终落在 canvas 的 x，可以反推：
-  // console.log("final canvasX", layoutXToCanvasX(n.layoutXFinal));
 }
 
 function gapForDuration(dur) {
@@ -407,7 +614,6 @@ function getCanvasPoint(e) {
   // 尽量拿页面/视口坐标（不同端字段不同）
   let x = e.detail?.x ?? t?.x ?? t?.clientX ?? t?.pageX;
   let y = e.detail?.y ?? t?.y ?? t?.clientY ?? t?.pageY;
-  console.log("页面x", e.detail?.x ?? t?.x ?? t?.clientX ?? t?.pageX);
 
   if (typeof x !== "number" || typeof y !== "number") return null;
 
@@ -430,13 +636,18 @@ function onScoreTap(e) {
   if (!p) return;
 
   // y → 音高（线/间吸附）
-  const key = yToKey_Treble(p.y);
+  const naturalKey = yToKey(p.y); // 你现有 y->自然音
+  const key = applyKeySigToKey(naturalKey, scoreConfig.value.keySig); // ✅ 按调号默认升降
+
+  console.log("keySig raw:", scoreConfig.value.keySig);
+  console.log("accMap:", getKeySigAccidentalMap(scoreConfig.value.keySig));
+  console.log("naturalKey", naturalKey, "key", key);
 
   // x → 限制在可写区域（避开谱号/拍号）
   const minX = scoreStave.getNoteStartX?.() ?? 60;
   const maxX = scoreStave.getX() + scoreStave.getWidth() - 10;
   const x = Math.max(minX, Math.min(maxX, p.x));
-  console.log("点击了", x, minX, maxX, p.x);
+  // console.log("点击了", x, minX, maxX, p.x);
   // const xPlaced = placeXAvoidOverlap(x);
   // === 碰撞检测：冲突就提示，不自动挪位置 ===
   if (isCollidingAtX(x)) {
@@ -452,6 +663,8 @@ function onScoreTap(e) {
     xCanvas: x,
     key,
     duration: selected.value.duration,
+    dots: selectedDots.value ?? 0,
+    accidental: selectedAccidental.value ?? null,
   });
 
   redrawScore();
@@ -465,7 +678,7 @@ function onScoreTap(e) {
 
 .score-canvas {
   width: 100%;
-  height: 520px;
+  height: 300px;
   border: 1px solid #333;
   border-radius: 10px;
   background: #fff;
@@ -480,8 +693,7 @@ function onScoreTap(e) {
 }
 
 .note-btn {
-  width: 92px;
-  padding: 10px 8px;
+  padding: 8px;
   border: 1px solid #999;
   border-radius: 12px;
   background: #fff;
@@ -494,8 +706,8 @@ function onScoreTap(e) {
 }
 
 .note-icon {
-  width: 40px;
-  height: 40px;
+  width: 30px;
+  height: 30px;
 }
 .note-label {
   margin-top: 6px;
@@ -516,5 +728,34 @@ function onScoreTap(e) {
 .danger-text {
   font-size: 14px;
   color: #ff4d4f;
+}
+
+.opt-bar {
+  margin-top: 10px;
+  padding: 10px 8px;
+  border: 1px solid #eee;
+  border-radius: 12px;
+  background: #fff;
+}
+.opt-title {
+  font-size: 12px;
+  color: #666;
+  margin-bottom: 8px;
+}
+.opt-row {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.opt-btn {
+  min-width: 44px;
+  padding: 6px 10px;
+  border: 1px solid #999;
+  border-radius: 10px;
+  text-align: center;
+  font-size: 14px;
+}
+.opt-btn.active {
+  border-color: #1677ff;
 }
 </style>
