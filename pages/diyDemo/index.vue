@@ -12,7 +12,7 @@
     <view class="opt-bar">
       <view class="opt-title">谱号</view>
       <view class="opt-row">
-        <view
+        <!-- <view
           class="opt-btn"
           :class="{ active: scoreConfig.clef === 'treble' }"
           @tap="setClef('treble')"
@@ -23,7 +23,16 @@
           :class="{ active: scoreConfig.clef === 'bass' }"
           @tap="setClef('bass')"
           >低音谱号</view
+        > -->
+        <view
+          v-for="k in clefOptions"
+          :key="k.value"
+          class="opt-btn"
+          :class="{ active: scoreConfig.clef === k.value }"
+          @tap="setClef(k.value)"
         >
+          {{ k.label }}
+        </view>
       </view>
     </view>
 
@@ -249,6 +258,14 @@ const KEY_SIG_ACC_COUNT = {
   Cb: { type: "flat", count: 7 },
 };
 
+//谱号选项
+const clefOptions = [
+  { label: "高音谱号", value: "treble" },
+  { label: "低音谱号", value: "bass" },
+  { label: "中音谱号", value: "alto" },
+  { label: "次中音谱号", value: "tenor" },
+];
+
 const selected = ref(durations[2]); // 默认四分音符
 
 // 记录已放入谱面的音符：{ key: "e/4", duration: "q" }
@@ -336,20 +353,80 @@ function applyKeySigToKey(naturalKey, keySig) {
  * 底线（第 5 线）是 E4，然后往上依次：
  * E4(线) F4(间) G4(线) A4(间) B4(线) C5(间) D5(线) E5(间) F5(线) ...
  */
-function yToKey_Treble(y) {
-  if (!scoreStave) return "e/4";
+// function yToKey_Treble(y) {
+//   if (!scoreStave) return "e/4";
 
-  const spacing = scoreStave.getSpacingBetweenLines(); // 相邻线的距离（px）
-  const stepSize = spacing / 2; // 线/间的步长
-  const bottomLineY = scoreStave.getYForLine(4); // line=4 是底线（VexFlow：0 顶线，4 底线）
+//   const spacing = scoreStave.getSpacingBetweenLines(); // 相邻线的距离（px）
+//   const stepSize = spacing / 2; // 线/间的步长
+//   const bottomLineY = scoreStave.getYForLine(4); // line=4 是底线（VexFlow：0 顶线，4 底线）
 
-  // step=0 表示底线 E4；step=1 表示 F4（底线与第二线之间的间）
-  let step = Math.round((bottomLineY - y) / stepSize);
+//   // step=0 表示底线 E4；step=1 表示 F4（底线与第二线之间的间）
+//   let step = Math.round((bottomLineY - y) / stepSize);
 
-  // 限制范围，避免点太高/太低导致疯狂飙 octave
-  step = Math.max(-10, Math.min(14, step));
+//   // 限制范围，避免点太高/太低导致疯狂飙 octave
+//   step = Math.max(-10, Math.min(14, step));
 
-  return diatonicStepToKeyFromE4(step);
+//   return diatonicStepToKeyFromE4(step);
+// }
+
+// function yToKey(y) {
+//   if (!scoreStave) return "c/4";
+
+//   const spacing = scoreStave.getSpacingBetweenLines();
+//   const stepSize = spacing / 2;
+//   const bottomLineY = scoreStave.getYForLine(4);
+
+//   let step = Math.round((bottomLineY - y) / stepSize);
+
+//   // 你原来的范围限制可以保留；bass 可以稍微放宽/下移也行
+//   step = Math.max(-10, Math.min(14, step));
+
+//   // 根据谱号选择“底线是什么音”
+//   const clef = scoreConfig.value.clef;
+//   const baseKey = clef === "bass" ? "g/2" : "e/4"; // ✅ treble 底线E4，bass 底线G2
+
+//   return diatonicStepToKeyFromBase(step, baseKey);
+// }
+
+function diatonicStepToKeyFromBase(step, baseKey) {
+  const letters = ["c", "d", "e", "f", "g", "a", "b"];
+  const [baseLetter, baseOct] = String(baseKey).split("/");
+  let idx = letters.indexOf(baseLetter);
+  let oct = Number(baseOct);
+  if (idx < 0 || Number.isNaN(oct)) return "c/4";
+
+  if (step > 0) {
+    for (let i = 0; i < step; i++) {
+      idx++;
+      if (idx >= 7) {
+        idx = 0;
+        oct++;
+      }
+    }
+  } else if (step < 0) {
+    for (let i = 0; i < -step; i++) {
+      idx--;
+      if (idx < 0) {
+        idx = 6;
+        oct--;
+      }
+    }
+  }
+  return `${letters[idx]}/${oct}`;
+}
+
+function getBaseKeyForClef(clef) {
+  switch (clef) {
+    case "bass":
+      return "g/2";
+    case "alto":
+      return "f/3";
+    case "tenor":
+      return "d/3";
+    case "treble":
+    default:
+      return "e/4";
+  }
 }
 
 function yToKey(y) {
@@ -360,14 +437,9 @@ function yToKey(y) {
   const bottomLineY = scoreStave.getYForLine(4);
 
   let step = Math.round((bottomLineY - y) / stepSize);
-
-  // 你原来的范围限制可以保留；bass 可以稍微放宽/下移也行
   step = Math.max(-10, Math.min(14, step));
 
-  // 根据谱号选择“底线是什么音”
-  const clef = scoreConfig.value.clef;
-  const baseKey = clef === "bass" ? "g/2" : "e/4"; // ✅ treble 底线E4，bass 底线G2
-
+  const baseKey = getBaseKeyForClef(scoreConfig.value.clef);
   return diatonicStepToKeyFromBase(step, baseKey);
 }
 
@@ -423,38 +495,38 @@ function placeXAvoidOverlap(xCanvasRaw) {
   return x0;
 }
 
-/**
- * 按自然音阶（不带升降号）走 step 步，返回 vexflow key 格式：比如 "c/5"
- */
-function diatonicStepToKeyFromBase(step, baseKey) {
-  const letters = ["c", "d", "e", "f", "g", "a", "b"];
+// /**
+//  * 按自然音阶（不带升降号）走 step 步，返回 vexflow key 格式：比如 "c/5"
+//  */
+// function diatonicStepToKeyFromBase(step, baseKey) {
+//   const letters = ["c", "d", "e", "f", "g", "a", "b"];
 
-  const [baseLetter, baseOct] = baseKey.split("/");
-  let letterIndex = letters.indexOf(baseLetter);
-  let octave = Number(baseOct);
+//   const [baseLetter, baseOct] = baseKey.split("/");
+//   let letterIndex = letters.indexOf(baseLetter);
+//   let octave = Number(baseOct);
 
-  if (letterIndex < 0 || Number.isNaN(octave)) return "c/4";
+//   if (letterIndex < 0 || Number.isNaN(octave)) return "c/4";
 
-  if (step > 0) {
-    for (let i = 0; i < step; i++) {
-      letterIndex += 1;
-      if (letterIndex >= 7) {
-        letterIndex = 0;
-        octave += 1; // b -> c 进八度
-      }
-    }
-  } else if (step < 0) {
-    for (let i = 0; i < Math.abs(step); i++) {
-      letterIndex -= 1;
-      if (letterIndex < 0) {
-        letterIndex = 6;
-        octave -= 1; // c -> b 退八度
-      }
-    }
-  }
+//   if (step > 0) {
+//     for (let i = 0; i < step; i++) {
+//       letterIndex += 1;
+//       if (letterIndex >= 7) {
+//         letterIndex = 0;
+//         octave += 1; // b -> c 进八度
+//       }
+//     }
+//   } else if (step < 0) {
+//     for (let i = 0; i < Math.abs(step); i++) {
+//       letterIndex -= 1;
+//       if (letterIndex < 0) {
+//         letterIndex = 6;
+//         octave -= 1; // c -> b 退八度
+//       }
+//     }
+//   }
 
-  return `${letters[letterIndex]}/${octave}`;
-}
+//   return `${letters[letterIndex]}/${octave}`;
+// }
 
 // =============== 初始化：主谱面 + 底部图标 canvas ===============
 onReady(() => {
@@ -498,7 +570,7 @@ function initScoreCanvas() {
 function buildStaveNote(n, context) {
   const dots = n.dots ?? 0;
   const note = new VF.StaveNote({
-    clef: "treble",
+    clef: scoreConfig.value.clef,
     keys: [n.key],
     duration: n.duration, // 仍然是 "q" / "8" / "16"...
     dots: dots, // 关键：ticks 由 dots 决定
