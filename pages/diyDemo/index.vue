@@ -347,46 +347,42 @@ function applyKeySigToKey(naturalKey, keySig) {
   return acc ? `${letter}${acc}/${octave}` : `${letter}/${octave}`;
 }
 
+//判断符杆方向
+function getStemDirectionByKey(key) {
+  // 用一个简单、稳定的阈值：看音符是否“高于当前谱号的中线”
+  // treble 中线是 B4；bass 中线是 D3；alto 中线是 C4；tenor 中线是 A3
+  const midByClef = {
+    treble: "b/4",
+    bass: "d/3",
+    alto: "c/4",
+    tenor: "a/3",
+  };
+
+  const mid = midByClef[scoreConfig.value.clef] || "b/4";
+
+  // 把 key 变成可比较的“度数”（只按字母+八度，不考虑#b；对杆方向足够）
+  function toDiatonicIndex(k) {
+    const m = String(k).match(/^([a-g])(bb|##|b|#|n)?\/(\d+)$/i);
+    if (!m) return 0;
+    const letter = m[1].toLowerCase();
+    const octave = Number(m[3]);
+    const order = { c: 0, d: 1, e: 2, f: 3, g: 4, a: 5, b: 6 };
+    return octave * 7 + order[letter];
+  }
+
+  const idx = toDiatonicIndex(key);
+  const midIdx = toDiatonicIndex(mid);
+
+  // 高于中线 => DOWN；低于中线 => UP；等于中线你可选 DOWN
+  return idx >= midIdx ? VF.Stem.DOWN : VF.Stem.UP;
+}
+
 // =============== 核心：y -> 音高 key（treble，按线/间吸附） ===============
 /**
  * 以高音谱号为例：
  * 底线（第 5 线）是 E4，然后往上依次：
  * E4(线) F4(间) G4(线) A4(间) B4(线) C5(间) D5(线) E5(间) F5(线) ...
  */
-// function yToKey_Treble(y) {
-//   if (!scoreStave) return "e/4";
-
-//   const spacing = scoreStave.getSpacingBetweenLines(); // 相邻线的距离（px）
-//   const stepSize = spacing / 2; // 线/间的步长
-//   const bottomLineY = scoreStave.getYForLine(4); // line=4 是底线（VexFlow：0 顶线，4 底线）
-
-//   // step=0 表示底线 E4；step=1 表示 F4（底线与第二线之间的间）
-//   let step = Math.round((bottomLineY - y) / stepSize);
-
-//   // 限制范围，避免点太高/太低导致疯狂飙 octave
-//   step = Math.max(-10, Math.min(14, step));
-
-//   return diatonicStepToKeyFromE4(step);
-// }
-
-// function yToKey(y) {
-//   if (!scoreStave) return "c/4";
-
-//   const spacing = scoreStave.getSpacingBetweenLines();
-//   const stepSize = spacing / 2;
-//   const bottomLineY = scoreStave.getYForLine(4);
-
-//   let step = Math.round((bottomLineY - y) / stepSize);
-
-//   // 你原来的范围限制可以保留；bass 可以稍微放宽/下移也行
-//   step = Math.max(-10, Math.min(14, step));
-
-//   // 根据谱号选择“底线是什么音”
-//   const clef = scoreConfig.value.clef;
-//   const baseKey = clef === "bass" ? "g/2" : "e/4"; // ✅ treble 底线E4，bass 底线G2
-
-//   return diatonicStepToKeyFromBase(step, baseKey);
-// }
 
 function diatonicStepToKeyFromBase(step, baseKey) {
   const letters = ["c", "d", "e", "f", "g", "a", "b"];
@@ -574,6 +570,7 @@ function buildStaveNote(n, context) {
     keys: [n.key],
     duration: n.duration, // 仍然是 "q" / "8" / "16"...
     dots: dots, // 关键：ticks 由 dots 决定
+    stem_direction: getStemDirectionByKey(n.key), // ✅ 自动上/下杆
   });
 
   note.setStave(scoreStave);
@@ -619,7 +616,7 @@ function redrawScore() {
 
   // 按 xCanvas 排序（可选）
   const list = [...notes.value].sort(
-    (a, b) => (a.xCanvas ?? a.x) - (b.xCanvas ?? b.x)
+    (a, b) => (a.xCanvas ?? a.x) - (b.xCanvas ?? b.x),
   );
 
   // ------------ 第一遍：测量每个音符需要的“中心对齐补偿” ------------
