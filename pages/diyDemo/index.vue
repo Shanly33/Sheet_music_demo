@@ -1,13 +1,33 @@
 <template>
   <view class="page">
-    <!-- 主五线谱 -->
-    <canvas
-      id="scoreCanvas"
-      canvas-id="scoreCanvas"
-      type="2d"
-      class="score-canvas"
-      @tap="onScoreTap"
-    />
+    <!-- 主五线谱：scroll-view 只做滚动条，canvas 叠在上面固定显示 -->
+    <view class="score-wrap" id="scoreWrap">
+      <canvas
+        id="scoreCanvas"
+        canvas-id="scoreCanvas"
+        type="2d"
+        class="score-canvas"
+        :style="{
+          width: viewW ? viewW + 'px' : '100%',
+          height: canvasCssH + 'px',
+        }"
+      />
+
+      <scroll-view
+        class="score-scroll"
+        scroll-x
+        enhanced
+        enable-passive
+        :show-scrollbar="false"
+        :bounces="false"
+        @scroll="onScoreScroll"
+        @tap="onScoreTap"
+      >
+        <view
+          :style="{ width: canvasCssW + 'px', height: canvasCssH + 'px' }"
+        ></view>
+      </scroll-view>
+    </view>
 
     <view class="opt-bar">
       <view class="opt-title">谱号</view>
@@ -141,6 +161,23 @@ const MAX_TRY_STEPS = 40; // 最多向两边尝试多少个槽位
 
 let canvasTop = 0;
 let canvasLeft = 0;
+
+const canvasCssW = ref(0); // canvas 的 CSS 宽度（总谱宽）
+const canvasCssH = ref(300); // 你现在 canvas 高度 300（和样式保持一致）
+const viewW = ref(0); // ✅ 视口宽（响应式，模板要用）
+
+let scrollLeftPx = 0;
+let scrollTimer = null;
+
+function onScoreScroll(e) {
+  const sl = e.detail?.scrollLeft ?? 0;
+  if (scrollTimer) return;
+  scrollTimer = setTimeout(() => {
+    scrollLeftPx = sl;
+    redrawScore(); // ✅ 滚动时重绘
+    scrollTimer = null;
+  }, 16);
+}
 
 /**
  * 你要给用户选的“音符类型/时值”
@@ -543,38 +580,43 @@ function placeXAvoidOverlap(xCanvasRaw) {
   return x0;
 }
 
-// /**
-//  * 按自然音阶（不带升降号）走 step 步，返回 vexflow key 格式：比如 "c/5"
-//  */
-// function diatonicStepToKeyFromBase(step, baseKey) {
-//   const letters = ["c", "d", "e", "f", "g", "a", "b"];
+/**
+ * 计算总分谱的宽度
+ * @returns {number} 总分谱的宽度
+ * @description
+ *   计算总分谱的宽度，包括 margin-left、每个小节的宽度、gap 的宽度和 margin-right
+ *   marginLeft = 10
+ *   measureW = 200
+ *   gapX = 10
+ *   paddingRight = 20
+ */
+function calcTotalScoreWidth() {
+  const marginLeft = 10;
+  const measureW = 200;
+  const gapX = 10;
+  const paddingRight = 20;
+  return marginLeft + measures.value.length * (measureW + gapX) + paddingRight;
+}
 
-//   const [baseLetter, baseOct] = baseKey.split("/");
-//   let letterIndex = letters.indexOf(baseLetter);
-//   let octave = Number(baseOct);
+function ensureCanvasSize() {
+  if (!scoreNode || !scoreCtx) return;
 
-//   if (letterIndex < 0 || Number.isNaN(octave)) return "c/4";
+  // ✅ 1) 维护“虚拟总宽”：给 scroll-view 占位用（决定能不能滚）
+  const wantVirtualW = Math.max(viewW.value || 0, calcTotalScoreWidth());
+  if (canvasCssW.value !== wantVirtualW) canvasCssW.value = wantVirtualW;
 
-//   if (step > 0) {
-//     for (let i = 0; i < step; i++) {
-//       letterIndex += 1;
-//       if (letterIndex >= 7) {
-//         letterIndex = 0;
-//         octave += 1; // b -> c 进八度
-//       }
-//     }
-//   } else if (step < 0) {
-//     for (let i = 0; i < Math.abs(step); i++) {
-//       letterIndex -= 1;
-//       if (letterIndex < 0) {
-//         letterIndex = 6;
-//         octave -= 1; // c -> b 退八度
-//       }
-//     }
-//   }
+  // ✅ 2) 维护“实际画布宽”：只画视口宽（性能关键）
+  const wCss = viewW.value || cssW || 0;
+  const hCss = canvasCssH.value;
 
-//   return `${letters[letterIndex]}/${octave}`;
-// }
+  const targetW = Math.floor(wCss * dpr);
+  const targetH = Math.floor(hCss * dpr);
+
+  if (scoreNode.width !== targetW) scoreNode.width = targetW;
+  if (scoreNode.height !== targetH) scoreNode.height = targetH;
+
+  scoreCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
+}
 
 // =============== 初始化：主谱面 + 底部图标 canvas ===============
 onReady(() => {
@@ -584,33 +626,37 @@ onReady(() => {
 function initScoreCanvas() {
   const q = uni.createSelectorQuery().in(instance);
 
-  q.select("#scoreCanvas").fields({ node: true, size: true });
-  q.select("#scoreCanvas").boundingClientRect();
+  q.select("#scoreCanvas").fields({ node: true, size: true }); // 只拿 node
+  q.select("#scoreWrap").boundingClientRect(); // ✅ 用容器测尺寸/位置
 
   q.exec((res) => {
-    const info = res?.[0];
-    const rect = res?.[1];
+    const info = res?.[0]; // canvas node
+    const wrap = res?.[1]; // scoreWrap rect
 
-    if (!info?.node || !rect) {
-      console.error("找不到主 canvas 或 rect");
+    if (!info?.node || !wrap) {
+      console.error("找不到 canvas node 或 scoreWrap rect");
       return;
     }
 
-    canvasTop = rect.top;
-    canvasLeft = rect.left;
+    // ✅ 用容器的位置做点击坐标基准（因为 tap 在 scroll-view 上）
+    canvasTop = wrap.top;
+    canvasLeft = wrap.left;
 
     scoreNode = info.node;
-    cssW = info.width;
-    cssH = info.height;
+
+    // ✅ 用容器宽作为“视口宽”
+    cssW = wrap.width;
+    viewW.value = wrap.width;
 
     dpr = uni.getSystemInfoSync().pixelRatio || 1;
-    scoreNode.width = Math.floor(cssW * dpr);
-    scoreNode.height = Math.floor(cssH * dpr);
-
     scoreCtx = scoreNode.getContext("2d");
-    scoreCtx.scale(dpr, dpr);
 
+    canvasCssH.value = 300;
+    canvasCssW.value = Math.max(cssW, calcTotalScoreWidth());
+
+    ensureCanvasSize();
     scoreRenderer = new VF.Renderer(scoreNode, VF.Renderer.Backends.CANVAS);
+
     redrawScore();
   });
 }
@@ -653,7 +699,9 @@ function drawStave(context) {
 function redrawScore() {
   if (!scoreRenderer || !scoreCtx) return;
 
-  scoreCtx.clearRect(0, 0, cssW, cssH);
+  ensureCanvasSize(); // 先确保 canvas 跟小节数一致
+  scoreCtx.clearRect(0, 0, viewW.value, canvasCssH.value);
+
   const context = scoreRenderer.getContext();
 
   const { beats, beatValue } = parseTimeSig(scoreConfig.value.timeSig);
@@ -662,19 +710,17 @@ function redrawScore() {
   const marginLeft = 10;
   const top = 30;
   const measureW = 200; // 每小节宽度
-  const gapX = 10; // 小节之间间距
-  const rowGap = 110; // 行间距（一个系统到下一行）
-  const perRow = Math.max(
-    1,
-    Math.floor((cssW - marginLeft) / (measureW + gapX)),
-  );
+  const gapX = 0; // 小节之间间距
+
+  const viewLeft = -50;
+  const viewRight = viewW.value + 50;
 
   measures.value.forEach((m, i) => {
-    const row = Math.floor(i / perRow);
-    const col = i % perRow;
+    const x = marginLeft + i * (measureW + gapX) - scrollLeftPx;
+    const y = top;
 
-    const x = marginLeft + col * (measureW + gapX);
-    const y = top + row * rowGap;
+    // ✅ 完全在屏幕外就不画
+    if (x + measureW < viewLeft || x > viewRight) return;
 
     // 每小节一个 stave
     const stave = new VF.Stave(x, y, measureW);
@@ -702,7 +748,9 @@ function redrawScore() {
     voice.setStrict(false); // MVP：允许没填满
     voice.addTickables(tickables);
 
-    new VF.Formatter().joinVoices([voice]).format([voice], measureW - 20);
+    const formatter = new VF.Formatter();
+    formatter.joinVoices([voice]);
+    formatter.formatToStave([voice], stave); // ✅关键：按 stave 的可写区排
     voice.draw(context, stave);
   });
 }
@@ -724,12 +772,12 @@ function getCanvasPoint(e) {
   if (typeof x !== "number" || typeof y !== "number") return null;
 
   // 统一转换成 canvas 内部坐标
-  x = x - canvasLeft;
+  x = x - canvasLeft + scrollLeftPx;
   y = y - canvasTop;
 
   // 防止点到 canvas 外面
-  x = Math.max(0, Math.min(cssW, x));
-  y = Math.max(0, Math.min(cssH, y));
+  x = Math.max(0, Math.min(canvasCssW.value, x));
+  y = Math.max(0, Math.min(canvasCssH.value, y));
 
   return { x, y };
 }
@@ -773,7 +821,7 @@ function onScoreTap(e) {
     dots: selectedDots.value ?? 0,
     accidental: selectedAccidental.value ?? null,
   });
-
+  ensureCanvasSize();
   redrawScore();
 }
 </script>
@@ -783,12 +831,30 @@ function onScoreTap(e) {
   padding: 16px;
 }
 
-.score-canvas {
+.score-wrap {
+  position: relative;
   width: 100%;
   height: 300px;
+}
+
+.score-canvas {
+  position: absolute;
+  left: 0;
+  top: 0;
+  z-index: 1;
   border: 1px solid #333;
   border-radius: 10px;
   background: #fff;
+}
+
+.score-scroll {
+  position: absolute;
+  left: 0;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 2; /* 在上面接收滚动/点击 */
+  background: transparent;
 }
 
 .note-bar {
