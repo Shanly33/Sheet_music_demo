@@ -23,27 +23,16 @@
         @scroll="onScoreScroll"
         @tap="onScoreTap"
       >
+        <!-- 占位：撑出可滚动宽度（决定能不能滚） -->
         <view
           :style="{ width: canvasCssW + 'px', height: canvasCssH + 'px' }"
-        ></view>
+        />
       </scroll-view>
     </view>
 
     <view class="opt-bar">
       <view class="opt-title">谱号</view>
       <view class="opt-row">
-        <!-- <view
-          class="opt-btn"
-          :class="{ active: scoreConfig.clef === 'treble' }"
-          @tap="setClef('treble')"
-          >高音谱号</view
-        >
-        <view
-          class="opt-btn"
-          :class="{ active: scoreConfig.clef === 'bass' }"
-          @tap="setClef('bass')"
-          >低音谱号</view
-        > -->
         <view
           v-for="k in clefOptions"
           :key="k.value"
@@ -88,7 +77,7 @@
       </view>
     </view>
 
-    <!-- 底部：音符时值选择（图标用 VexFlow 画） -->
+    <!-- 底部：音符时值选择 -->
     <view class="note-bar">
       <view
         v-for="d in durations"
@@ -137,12 +126,6 @@
           @tap="selectDots(1)"
           >1</view
         >
-        <!-- <view
-          class="opt-btn"
-          :class="{ active: selectedDots === 2 }"
-          @tap="selectDots(2)"
-          >2</view
-        > -->
       </view>
     </view>
   </view>
@@ -156,15 +139,15 @@ import Vex from "vexflow";
 const VF = Vex.Flow;
 const instance = getCurrentInstance();
 
-const MIN_NOTE_GAP = 18; // 音符最小水平间距（像素）
-const MAX_TRY_STEPS = 40; // 最多向两边尝试多少个槽位
+const MIN_NOTE_GAP = 18;
+const MAX_TRY_STEPS = 40;
 
 let canvasTop = 0;
 let canvasLeft = 0;
 
-const canvasCssW = ref(0); // canvas 的 CSS 宽度（总谱宽）
-const canvasCssH = ref(300); // 你现在 canvas 高度 300（和样式保持一致）
-const viewW = ref(0); // ✅ 视口宽（响应式，模板要用）
+const canvasCssW = ref(0); // 总谱虚拟宽（给 scroll-view 占位）
+const canvasCssH = ref(300);
+const viewW = ref(0); // 视口宽
 
 let scrollLeftPx = 0;
 let scrollTimer = null;
@@ -174,16 +157,12 @@ function onScoreScroll(e) {
   if (scrollTimer) return;
   scrollTimer = setTimeout(() => {
     scrollLeftPx = sl;
-    redrawScore(); // ✅ 滚动时重绘
+    redrawScore();
     scrollTimer = null;
   }, 16);
 }
 
-/**
- * 你要给用户选的“音符类型/时值”
- * VexFlow duration：
- * w=全音符, h=二分, q=四分, 8=八分, 16=十六分
- */
+// 音符时值
 const durations = [
   {
     id: "w",
@@ -229,7 +208,6 @@ const durations = [
   },
 ];
 
-// 临时记号
 const accidentals = [
   { id: "none", label: "无", value: null },
   { id: "#", label: "♯", value: "#" },
@@ -247,7 +225,6 @@ const timeSigOptions = [
   { label: "12/8", value: "12/8" },
 ];
 
-// 常见调号（大调写法），够用
 const keySigOptions = [
   { label: "C (0)", value: "C" },
   { label: "G (1#)", value: "G" },
@@ -267,15 +244,13 @@ const keySigOptions = [
 ];
 
 const scoreConfig = ref({
-  clef: "treble", // 你现在固定也行；后面再扩展 treble/bass
+  clef: "treble",
   timeSig: "4/4",
   keySig: "C",
 });
 
-// 升号、降号的固定顺序（乐理规则）
 const SHARP_ORDER = ["f", "c", "g", "d", "a", "e", "b"];
 const FLAT_ORDER = ["b", "e", "a", "d", "g", "c", "f"];
-// 常见大调调号：有几个升/降
 const KEY_SIG_ACC_COUNT = {
   C: { type: "sharp", count: 0 },
   G: { type: "sharp", count: 1 },
@@ -285,7 +260,6 @@ const KEY_SIG_ACC_COUNT = {
   B: { type: "sharp", count: 5 },
   "F#": { type: "sharp", count: 6 },
   "C#": { type: "sharp", count: 7 },
-
   F: { type: "flat", count: 1 },
   Bb: { type: "flat", count: 2 },
   Eb: { type: "flat", count: 3 },
@@ -295,7 +269,6 @@ const KEY_SIG_ACC_COUNT = {
   Cb: { type: "flat", count: 7 },
 };
 
-//谱号选项
 const clefOptions = [
   { label: "高音谱号", value: "treble" },
   { label: "低音谱号", value: "bass" },
@@ -303,116 +276,128 @@ const clefOptions = [
   { label: "次中音谱号", value: "tenor" },
 ];
 
-const selected = ref(durations[2]); // 默认四分音符
-
-// 记录已放入谱面的音符：{ key: "e/4", duration: "q" }
-const notes = ref([]);
-// 一个小节：{ notes: [], used: 0 }
+const selected = ref(durations[2]);
 const measures = ref([{ notes: [], used: 0 }]);
-const selectedAccidental = ref(null); // null | "#" | "b" | "n"
-const selectedDots = ref(0); // 0 | 1 | 2
+const selectedAccidental = ref(null);
+const selectedDots = ref(0);
 
-// 主谱面 canvas & vexflow 对象
+// canvas & renderer
 let scoreNode = null;
 let scoreCtx = null;
 let scoreRenderer = null;
 let scoreStave = null;
-
 let cssW = 0;
-let cssH = 0;
 let dpr = 1;
 
 function selectDuration(d) {
   selected.value = d;
 }
-
 function clearAll() {
   measures.value = [{ notes: [], used: 0 }];
   redrawScore();
 }
-
 function selectAccidental(a) {
-  selectedAccidental.value = a; // a: null | "#" | "b" | "n"
+  selectedAccidental.value = a;
 }
-
 function selectDots(k) {
-  selectedDots.value = k; // 0|1
+  selectedDots.value = k;
 }
-
 function setClef(clef) {
   scoreConfig.value.clef = clef;
   redrawScore();
 }
-
 function selectTimeSig(v) {
   scoreConfig.value.timeSig = v;
   redrawScore();
 }
-
 function selectKeySig(v) {
   scoreConfig.value.keySig = v;
   redrawScore();
 }
 
-// ================= 分小节：时间轴基础 =================
-const TPQ = 480; // 每四分音符 ticks（固定常量即可）
-
+// ===== ticks helpers（你现阶段按 x 放置时用不到 used，但保留）=====
+const TPQ = 480;
 function parseTimeSig(ts) {
   const [a, b] = String(ts)
     .split("/")
     .map((x) => Number(x));
   return { beats: a || 4, beatValue: b || 4 };
 }
-
-function getMeasureTicks() {
-  const { beats, beatValue } = parseTimeSig(scoreConfig.value.timeSig);
-  // 一拍 = 4/beatValue 个四分音符
-  const quartersPerBeat = 4 / beatValue;
-  return Math.round(beats * quartersPerBeat * TPQ);
-}
-
 function durationToQuarters(dur) {
   const map = { w: 4, h: 2, q: 1, 8: 0.5, 16: 0.25, 32: 0.125, 64: 0.0625 };
   return map[dur] ?? 1;
 }
-
 function noteToTicks(duration, dots) {
   const base = durationToQuarters(duration) * TPQ;
-  const factor = dots ? 1.5 : 1.0; // 你现在只支持 0/1 点
+  const factor = dots ? 1.5 : 1.0;
   return Math.round(base * factor);
 }
 
-//往小节里“顺序追加音符”的
+function getMeasureTicks() {
+  const { beats, beatValue } = parseTimeSig(scoreConfig.value.timeSig);
+  const quartersPerBeat = 4 / beatValue; // 一拍等于多少个四分音符
+  return Math.round(beats * quartersPerBeat * TPQ);
+}
+// ✅ 点哪儿放哪儿：只要 measureIndex 存在，就放到指定小节
 function addNoteToMeasures(noteData) {
   const measureTicks = getMeasureTicks();
   const ticks = noteToTicks(noteData.duration, noteData.dots);
 
-  let m = measures.value[measures.value.length - 1];
+  // 1) 目标小节 = 最后一个小节（按时间顺序追加）
+  let idx = measures.value.length - 1;
+  let m = measures.value[idx];
 
-  // 放不下 -> 新开小节
+  // 2) 放不下 -> 新开小节
   if (m.used + ticks > measureTicks) {
     measures.value.push({ notes: [], used: 0 });
-    m = measures.value[measures.value.length - 1];
+    idx++;
+    m = measures.value[idx];
   }
 
+  // 3) 计算该小节内的 userX（优先用点击 xAbs，如果不落在该小节，就用“时间进度自动 x”）
+  const marginLeft = 10;
+  const measureW = 200;
+  const gapX = 0;
+
+  const headBlock = idx === 0 ? 60 : 10; // 第一小节避开谱头
+  const left = headBlock;
+  const right = measureW - 10;
+
+  let userX;
+
+  // noteData.xAbs 是“总谱逻辑 x”（已加 scrollLeftPx），用它推算落在哪个小节内
+  if (typeof noteData.xAbs === "number") {
+    const xInMeasure = noteData.xAbs - (marginLeft + idx * (measureW + gapX));
+    // 只有当点击 x 真正在目标小节范围内，才采用它
+    if (xInMeasure >= 0 && xInMeasure <= measureW) {
+      userX = Math.max(left, Math.min(right, xInMeasure));
+    }
+  }
+
+  // 如果点击不在目标小节范围内（或没传 xAbs），就用“按时间进度”给一个稳定的 x
+  if (typeof userX !== "number") {
+    const progress = measureTicks ? m.used / measureTicks : 0; // 0~1
+    userX = left + progress * (right - left);
+    userX = Math.max(left, Math.min(right, userX));
+  }
+
+  // 4) 写入
   m.notes.push({
     ...noteData,
     ticks,
+    userX, // 小节内像素 x（用于你当前的自定义对齐绘制）
+    measureIndex: idx, // 记录归属小节（绘制时用）
     offsetTicks: m.used,
   });
 
+  // 5) 更新 used
   m.used += ticks;
 }
 
-/**
- * 根据当前调号，返回一个映射：{ f: "#", c: "#", ... } 或 { b:"b", e:"b", ...}
- */
 function getKeySigAccidentalMap(keySig) {
   const info = KEY_SIG_ACC_COUNT[keySig] || KEY_SIG_ACC_COUNT.C;
   const map = {};
-
   if (info.count <= 0) return map;
-
   if (info.type === "sharp") {
     for (let i = 0; i < info.count; i++) map[SHARP_ORDER[i]] = "#";
   } else {
@@ -420,36 +405,18 @@ function getKeySigAccidentalMap(keySig) {
   }
   return map;
 }
-
-/**
- * 把一个自然音 key（例如 "f/4"）按调号变成默认音高（例如 D大调 => "f#/4"）
- * 注意：这里只改变 key 字符串，不添加临时记号（因为调号已显示）
- */
 function applyKeySigToKey(naturalKey, keySig) {
   const accMap = getKeySigAccidentalMap(keySig);
-
   const [letterRaw, octaveRaw] = String(naturalKey).split("/");
   const letter = (letterRaw || "c").toLowerCase();
   const octave = octaveRaw || "4";
-
-  const acc = accMap[letter]; // "#" 或 "b" 或 undefined
+  const acc = accMap[letter];
   return acc ? `${letter}${acc}/${octave}` : `${letter}/${octave}`;
 }
 
-//判断符杆方向
 function getStemDirectionByKey(key) {
-  // 用一个简单、稳定的阈值：看音符是否“高于当前谱号的中线”
-  // treble 中线是 B4；bass 中线是 D3；alto 中线是 C4；tenor 中线是 A3
-  const midByClef = {
-    treble: "b/4",
-    bass: "d/3",
-    alto: "c/4",
-    tenor: "a/3",
-  };
-
+  const midByClef = { treble: "b/4", bass: "d/3", alto: "c/4", tenor: "a/3" };
   const mid = midByClef[scoreConfig.value.clef] || "b/4";
-
-  // 把 key 变成可比较的“度数”（只按字母+八度，不考虑#b；对杆方向足够）
   function toDiatonicIndex(k) {
     const m = String(k).match(/^([a-g])(bb|##|b|#|n)?\/(\d+)$/i);
     if (!m) return 0;
@@ -458,28 +425,18 @@ function getStemDirectionByKey(key) {
     const order = { c: 0, d: 1, e: 2, f: 3, g: 4, a: 5, b: 6 };
     return octave * 7 + order[letter];
   }
-
-  const idx = toDiatonicIndex(key);
-  const midIdx = toDiatonicIndex(mid);
-
-  // 高于中线 => DOWN；低于中线 => UP；等于中线你可选 DOWN
-  return idx >= midIdx ? VF.Stem.DOWN : VF.Stem.UP;
+  return toDiatonicIndex(key) >= toDiatonicIndex(mid)
+    ? VF.Stem.DOWN
+    : VF.Stem.UP;
 }
 
-// =============== 核心：y -> 音高 key（treble，按线/间吸附） ===============
-/**
- * 以高音谱号为例：
- * 底线（第 5 线）是 E4，然后往上依次：
- * E4(线) F4(间) G4(线) A4(间) B4(线) C5(间) D5(线) E5(间) F5(线) ...
- */
-
+// ===== y -> key =====
 function diatonicStepToKeyFromBase(step, baseKey) {
   const letters = ["c", "d", "e", "f", "g", "a", "b"];
   const [baseLetter, baseOct] = String(baseKey).split("/");
   let idx = letters.indexOf(baseLetter);
   let oct = Number(baseOct);
   if (idx < 0 || Number.isNaN(oct)) return "c/4";
-
   if (step > 0) {
     for (let i = 0; i < step; i++) {
       idx++;
@@ -499,7 +456,6 @@ function diatonicStepToKeyFromBase(step, baseKey) {
   }
   return `${letters[idx]}/${oct}`;
 }
-
 function getBaseKeyForClef(clef) {
   switch (clef) {
     case "bass":
@@ -513,83 +469,41 @@ function getBaseKeyForClef(clef) {
       return "e/4";
   }
 }
-
 function yToKey(y) {
   if (!scoreStave) return "c/4";
-
   const spacing = scoreStave.getSpacingBetweenLines();
   const stepSize = spacing / 2;
   const bottomLineY = scoreStave.getYForLine(4);
-
   let step = Math.round((bottomLineY - y) / stepSize);
   step = Math.max(-10, Math.min(14, step));
-
   const baseKey = getBaseKeyForClef(scoreConfig.value.clef);
   return diatonicStepToKeyFromBase(step, baseKey);
 }
 
-//获取音符开始时间
-function getNoteStartX() {
-  return scoreStave?.getNoteStartX?.() ?? 0;
+// ===== x helpers（避免你后续调用报 isXFree 未定义）=====
+function gapForDuration(dur) {
+  const map = { w: 30, h: 24, q: 20, 8: 18, 16: 18, 32: 18, 64: 18 };
+  return map[dur] ?? 28;
 }
-
-// canvas 绝对 x -> VexFlow 布局 x（以 noteStartX 为 0）
-function canvasXToLayoutX(canvasX) {
-  return canvasX - getNoteStartX();
+function isXFree(_x) {
+  // 你现在未启用碰撞逻辑，这里先返回 true 兜底
+  return true;
 }
-
-function getDrawableXRange() {
-  const minX = scoreStave?.getNoteStartX?.() ?? 0;
-  const maxX =
-    (scoreStave?.getX?.() ?? 0) + (scoreStave?.getWidth?.() ?? cssW) - 10;
-  return { minX, maxX };
-}
-
-function isCollidingAtX(xCanvas) {
-  for (const n of notes.value) {
-    const xn = n.xCanvas ?? n.x; // 兼容旧字段
-    if (typeof xn !== "number") continue;
-    if (Math.abs(xCanvas - xn) < MIN_NOTE_GAP) return true;
-  }
-  return false;
-}
-
-/**
- * 输入：用户点击的 xCanvas（canvas 绝对坐标）
- * 输出：一个“附近不重叠”的 xCanvas（尽量贴近原点）
- */
 function placeXAvoidOverlap(xCanvasRaw) {
-  const { minX, maxX } = getDrawableXRange();
-
-  // 先 clamp 到可写区
-  let x0 = Math.max(minX, Math.min(maxX, xCanvasRaw));
-
-  // 如果当前位置不冲突，直接用
-  if (isXFree(x0)) return x0;
-
-  // 否则以 MIN_NOTE_GAP 为步长，左右交替找最近空位
-  for (let k = 1; k <= MAX_TRY_STEPS; k++) {
-    const xr = x0 + k * gapForDuration(selected.value.duration);
-    if (xr <= maxX && isXFree(xr)) return xr;
-
-    const xl = x0 - k * gapForDuration(selected.value.duration);
-    if (xl >= minX && isXFree(xl)) return xl;
-  }
-
-  // 实在找不到就返回 clamp 后的值（兜底）
-  return x0;
+  // 你目前没在用它，但保留也不炸
+  return xCanvasRaw;
 }
 
-/**
- * 计算总分谱的宽度
- * @returns {number} 总分谱的宽度
- * @description
- *   计算总分谱的宽度，包括 margin-left、每个小节的宽度、gap 的宽度和 margin-right
- *   marginLeft = 10
- *   measureW = 200
- *   gapX = 10
- *   paddingRight = 20
- */
+// 小节可写区（绝对坐标）
+function getMeasureWriteRange(stave, isFirstMeasure) {
+  const left = isFirstMeasure
+    ? (stave.getNoteStartX?.() ?? stave.getX() + 60)
+    : stave.getX() + 10;
+  const right = stave.getX() + stave.getWidth() - 10;
+  return { left, right };
+}
+
+// 总宽（决定 scroll-view 可滚范围）
 function calcTotalScoreWidth() {
   const marginLeft = 10;
   const measureW = 200;
@@ -601,11 +515,11 @@ function calcTotalScoreWidth() {
 function ensureCanvasSize() {
   if (!scoreNode || !scoreCtx) return;
 
-  // ✅ 1) 维护“虚拟总宽”：给 scroll-view 占位用（决定能不能滚）
+  // 1) 虚拟总宽（scroll-view 占位）
   const wantVirtualW = Math.max(viewW.value || 0, calcTotalScoreWidth());
   if (canvasCssW.value !== wantVirtualW) canvasCssW.value = wantVirtualW;
 
-  // ✅ 2) 维护“实际画布宽”：只画视口宽（性能关键）
+  // 2) 实际画布宽（只画视口，性能关键）
   const wCss = viewW.value || cssW || 0;
   const hCss = canvasCssH.value;
 
@@ -618,33 +532,27 @@ function ensureCanvasSize() {
   scoreCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
 }
 
-// =============== 初始化：主谱面 + 底部图标 canvas ===============
 onReady(() => {
   initScoreCanvas();
 });
 
 function initScoreCanvas() {
   const q = uni.createSelectorQuery().in(instance);
-
-  q.select("#scoreCanvas").fields({ node: true, size: true }); // 只拿 node
-  q.select("#scoreWrap").boundingClientRect(); // ✅ 用容器测尺寸/位置
+  q.select("#scoreCanvas").fields({ node: true, size: true });
+  q.select("#scoreWrap").boundingClientRect();
 
   q.exec((res) => {
-    const info = res?.[0]; // canvas node
-    const wrap = res?.[1]; // scoreWrap rect
-
+    const info = res?.[0];
+    const wrap = res?.[1];
     if (!info?.node || !wrap) {
       console.error("找不到 canvas node 或 scoreWrap rect");
       return;
     }
 
-    // ✅ 用容器的位置做点击坐标基准（因为 tap 在 scroll-view 上）
     canvasTop = wrap.top;
     canvasLeft = wrap.left;
 
     scoreNode = info.node;
-
-    // ✅ 用容器宽作为“视口宽”
     cssW = wrap.width;
     viewW.value = wrap.width;
 
@@ -663,7 +571,6 @@ function initScoreCanvas() {
 
 function buildStaveNote(n, context, stave) {
   const dots = n.dots ?? 0;
-
   const note = new VF.StaveNote({
     clef: scoreConfig.value.clef,
     keys: [n.key],
@@ -674,43 +581,25 @@ function buildStaveNote(n, context, stave) {
   note.setContext(context);
   note.setStave(stave);
 
-  if (n.accidental) {
-    note.addModifier(new VF.Accidental(n.accidental), 0);
-  }
-  if (dots) {
-    VF.Dot.buildAndAttach([note], { all: true });
-  }
+  if (n.accidental) note.addModifier(new VF.Accidental(n.accidental), 0);
+  if (dots) VF.Dot.buildAndAttach([note], { all: true });
 
   return note;
 }
 
-function drawStave(context) {
-  scoreStave = new VF.Stave(10, 40, cssW - 20);
-
-  const { clef, timeSig, keySig } = scoreConfig.value;
-  if (clef) scoreStave.addClef(clef);
-  if (timeSig) scoreStave.addTimeSignature(timeSig);
-  if (keySig) scoreStave.addKeySignature(keySig);
-
-  scoreStave.setContext(context).draw();
-}
-
-// =============== 重绘主谱面（每次点击都全量重绘，MVP 最稳） ===============
+// ✅ 核心：按“用户点击 x”硬对齐（稳定版）
 function redrawScore() {
   if (!scoreRenderer || !scoreCtx) return;
 
-  ensureCanvasSize(); // 先确保 canvas 跟小节数一致
+  ensureCanvasSize();
   scoreCtx.clearRect(0, 0, viewW.value, canvasCssH.value);
 
   const context = scoreRenderer.getContext();
 
-  const { beats, beatValue } = parseTimeSig(scoreConfig.value.timeSig);
-
-  // ====== 小节布局参数（你可以自己调） ======
   const marginLeft = 10;
   const top = 30;
-  const measureW = 200; // 每小节宽度
-  const gapX = 0; // 小节之间间距
+  const measureW = 200;
+  const gapX = 0;
 
   const viewLeft = -50;
   const viewRight = viewW.value + 50;
@@ -719,13 +608,10 @@ function redrawScore() {
     const x = marginLeft + i * (measureW + gapX) - scrollLeftPx;
     const y = top;
 
-    // ✅ 完全在屏幕外就不画
     if (x + measureW < viewLeft || x > viewRight) return;
 
-    // 每小节一个 stave
     const stave = new VF.Stave(x, y, measureW);
 
-    // 第一小节画 clef/key/time
     if (i === 0) {
       scoreStave = stave;
       stave.addClef(scoreConfig.value.clef);
@@ -735,92 +621,84 @@ function redrawScore() {
         stave.addTimeSignature(scoreConfig.value.timeSig);
     }
 
-    // 小节线
     stave.setEndBarType(VF.Barline.type.SINGLE);
     stave.setContext(context).draw();
 
-    if (!m.notes.length) return;
+    if (!m.notes?.length) return;
 
-    // 构建小节内 notes
-    const tickables = m.notes.map((n) => buildStaveNote(n, context, stave));
+    // 1) 纯显示顺序：按 userX 排序
+    const sortedNotes = [...m.notes].sort(
+      (a, b) => (a.userX ?? 0) - (b.userX ?? 0),
+    );
 
-    const voice = new VF.Voice({ num_beats: beats, beat_value: beatValue });
-    voice.setStrict(false); // MVP：允许没填满
-    voice.addTickables(tickables);
+    // 2) 可写区（绝对坐标）
+    const isFirst = i === 0;
+    const { left, right } = getMeasureWriteRange(stave, isFirst);
 
-    const formatter = new VF.Formatter();
-    formatter.joinVoices([voice]);
-    formatter.formatToStave([voice], stave); // ✅关键：按 stave 的可写区排
-    voice.draw(context, stave);
+    // 3) 每个音符独立 tickContext -> preFormat -> 用 setXShift 对齐到 desiredAbsX
+    sortedNotes.forEach((n) => {
+      const note = buildStaveNote(n, context, stave);
+
+      const tc = new VF.TickContext();
+      tc.addTickable(note);
+      tc.preFormat(); // ✅ 让 note 成为“已格式化”状态
+
+      // 先放到左边一个基准 x（不重要，后面会 shift 对齐）
+      tc.setX(left);
+      note.setTickContext(tc);
+
+      const ux = typeof n.userX === "number" ? n.userX : 0;
+
+      // 你存的是“小节内像素”，变成当前画布的“绝对 x”
+      const desiredAbsX = Math.max(left, Math.min(right, stave.getX() + ux));
+
+      // ✅ 当前真实绝对 x（关键：不要用 tc.getX 代替）
+      const curAbsX = note.getAbsoluteX();
+
+      // 平移到目标点
+      note.setXShift(desiredAbsX - curAbsX);
+
+      note.draw();
+    });
   });
 }
 
-function gapForDuration(dur) {
-  const map = { w: 30, h: 24, q: 20, 8: 18, 16: 18, 32: 18, 64: 18 };
-  return map[dur] ?? 28;
-}
-
-//获取canvas坐标
-
 function getCanvasPoint(e) {
   const t = e.changedTouches?.[0] || e.touches?.[0];
-
-  // 尽量拿页面/视口坐标（不同端字段不同）
   let x = e.detail?.x ?? t?.x ?? t?.clientX ?? t?.pageX;
   let y = e.detail?.y ?? t?.y ?? t?.clientY ?? t?.pageY;
-
   if (typeof x !== "number" || typeof y !== "number") return null;
 
-  // 统一转换成 canvas 内部坐标
+  // 转成“总谱逻辑坐标”：x 需要 + scrollLeftPx
   x = x - canvasLeft + scrollLeftPx;
   y = y - canvasTop;
 
-  // 防止点到 canvas 外面
   x = Math.max(0, Math.min(canvasCssW.value, x));
   y = Math.max(0, Math.min(canvasCssH.value, y));
-
   return { x, y };
 }
 
-// =============== 用户点主谱面：y 决定音高 + 当前选中 duration 决定时值 ===============
 function onScoreTap(e) {
   if (!selected.value) return;
-  if (!scoreStave) redrawScore(); // 确保映射用谱表存在（首次进入）
+  if (!scoreStave) redrawScore();
   if (!scoreStave) return;
 
   const p = getCanvasPoint(e);
   if (!p) return;
 
-  // y → 音高（线/间吸附）
-  const naturalKey = yToKey(p.y); // 你现有 y->自然音
-  const key = applyKeySigToKey(naturalKey, scoreConfig.value.keySig); // ✅ 按调号默认升降
+  const naturalKey = yToKey(p.y);
+  const key = applyKeySigToKey(naturalKey, scoreConfig.value.keySig);
 
-  console.log("keySig raw:", scoreConfig.value.keySig);
-  console.log("accMap:", getKeySigAccidentalMap(scoreConfig.value.keySig));
-  console.log("naturalKey", naturalKey, "key", key);
-
-  // x → 限制在可写区域（避开谱号/拍号）
-  // const minX = scoreStave.getNoteStartX?.() ?? 60;
-  // const maxX = scoreStave.getX() + scoreStave.getWidth() - 10;
-  // const x = Math.max(minX, Math.min(maxX, p.x));
-  // // console.log("点击了", x, minX, maxX, p.x);
-  // // const xPlaced = placeXAvoidOverlap(x);
-  // // === 碰撞检测：冲突就提示，不自动挪位置 ===
-  // if (isCollidingAtX(x)) {
-  //   uni.showToast({
-  //     title: `离已有音符太近，请重新选择位置`,
-  //     icon: "none",
-  //     duration: 1200,
-  //   });
-  //   return;
-  // }
-
+  // ✅ 注意：不再根据点击 x 来决定 measureIndex
+  //     只把“总谱逻辑 xAbs”传进去，让 addNoteToMeasures 在“目标小节”里判断是否采用点击 x
   addNoteToMeasures({
     key,
     duration: selected.value.duration,
     dots: selectedDots.value ?? 0,
     accidental: selectedAccidental.value ?? null,
+    xAbs: p.x, // ✅ 传总谱逻辑 x
   });
+
   ensureCanvasSize();
   redrawScore();
 }
@@ -853,7 +731,7 @@ function onScoreTap(e) {
   top: 0;
   right: 0;
   bottom: 0;
-  z-index: 2; /* 在上面接收滚动/点击 */
+  z-index: 2;
   background: transparent;
 }
 
@@ -881,15 +759,6 @@ function onScoreTap(e) {
 .note-icon {
   width: 30px;
   height: 30px;
-}
-.note-label {
-  margin-top: 6px;
-  font-size: 12px;
-}
-
-.icon-canvas {
-  width: 70px;
-  height: 44px;
 }
 
 .note-btn.danger {
