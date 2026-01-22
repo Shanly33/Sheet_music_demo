@@ -270,6 +270,8 @@ const selected = ref(durations[2]); // 默认四分音符
 
 // 记录已放入谱面的音符：{ key: "e/4", duration: "q" }
 const notes = ref([]);
+// 一个小节：{ notes: [], used: 0 }
+const measures = ref([{ notes: [], used: 0 }]);
 const selectedAccidental = ref(null); // null | "#" | "b" | "n"
 const selectedDots = ref(0); // 0 | 1 | 2
 
@@ -288,7 +290,7 @@ function selectDuration(d) {
 }
 
 function clearAll() {
-  notes.value = [];
+  measures.value = [{ notes: [], used: 0 }];
   redrawScore();
 }
 
@@ -313,6 +315,56 @@ function selectTimeSig(v) {
 function selectKeySig(v) {
   scoreConfig.value.keySig = v;
   redrawScore();
+}
+
+// ================= 分小节：时间轴基础 =================
+const TPQ = 480; // 每四分音符 ticks（固定常量即可）
+
+function parseTimeSig(ts) {
+  const [a, b] = String(ts)
+    .split("/")
+    .map((x) => Number(x));
+  return { beats: a || 4, beatValue: b || 4 };
+}
+
+function getMeasureTicks() {
+  const { beats, beatValue } = parseTimeSig(scoreConfig.value.timeSig);
+  // 一拍 = 4/beatValue 个四分音符
+  const quartersPerBeat = 4 / beatValue;
+  return Math.round(beats * quartersPerBeat * TPQ);
+}
+
+function durationToQuarters(dur) {
+  const map = { w: 4, h: 2, q: 1, 8: 0.5, 16: 0.25, 32: 0.125, 64: 0.0625 };
+  return map[dur] ?? 1;
+}
+
+function noteToTicks(duration, dots) {
+  const base = durationToQuarters(duration) * TPQ;
+  const factor = dots ? 1.5 : 1.0; // 你现在只支持 0/1 点
+  return Math.round(base * factor);
+}
+
+//往小节里“顺序追加音符”的
+function addNoteToMeasures(noteData) {
+  const measureTicks = getMeasureTicks();
+  const ticks = noteToTicks(noteData.duration, noteData.dots);
+
+  let m = measures.value[measures.value.length - 1];
+
+  // 放不下 -> 新开小节
+  if (m.used + ticks > measureTicks) {
+    measures.value.push({ notes: [], used: 0 });
+    m = measures.value[measures.value.length - 1];
+  }
+
+  m.notes.push({
+    ...noteData,
+    ticks,
+    offsetTicks: m.used,
+  });
+
+  m.used += ticks;
 }
 
 /**
@@ -563,27 +615,23 @@ function initScoreCanvas() {
   });
 }
 
-function buildStaveNote(n, context) {
+function buildStaveNote(n, context, stave) {
   const dots = n.dots ?? 0;
+
   const note = new VF.StaveNote({
     clef: scoreConfig.value.clef,
     keys: [n.key],
-    duration: n.duration, // 仍然是 "q" / "8" / "16"...
-    dots: dots, // 关键：ticks 由 dots 决定
-    stem_direction: getStemDirectionByKey(n.key), // ✅ 自动上/下杆
+    duration: n.duration,
+    stem_direction: getStemDirectionByKey(n.key),
   });
 
-  note.setStave(scoreStave);
   note.setContext(context);
+  note.setStave(stave);
 
-  // 临时记号
   if (n.accidental) {
     note.addModifier(new VF.Accidental(n.accidental), 0);
   }
-
-  if (dots > 0) {
-    // 先保证 note 自己知道有几个点（你已经在构造里 dots: dots 了）
-    // 然后让 VexFlow 用官方方法把点“正确地”挂上去并排版
+  if (dots) {
     VF.Dot.buildAndAttach([note], { all: true });
   }
 
@@ -605,68 +653,57 @@ function drawStave(context) {
 function redrawScore() {
   if (!scoreRenderer || !scoreCtx) return;
 
-  // 清屏
   scoreCtx.clearRect(0, 0, cssW, cssH);
   const context = scoreRenderer.getContext();
 
-  // 画谱表
-  drawStave(context);
+  const { beats, beatValue } = parseTimeSig(scoreConfig.value.timeSig);
 
-  if (notes.value.length === 0) return;
-
-  // 按 xCanvas 排序（可选）
-  const list = [...notes.value].sort(
-    (a, b) => (a.xCanvas ?? a.x) - (b.xCanvas ?? b.x),
+  // ====== 小节布局参数（你可以自己调） ======
+  const marginLeft = 10;
+  const top = 30;
+  const measureW = 200; // 每小节宽度
+  const gapX = 10; // 小节之间间距
+  const rowGap = 110; // 行间距（一个系统到下一行）
+  const perRow = Math.max(
+    1,
+    Math.floor((cssW - marginLeft) / (measureW + gapX)),
   );
 
-  // ------------ 第一遍：测量每个音符需要的“中心对齐补偿” ------------
-  const measured = [];
+  measures.value.forEach((m, i) => {
+    const row = Math.floor(i / perRow);
+    const col = i % perRow;
 
-  list.forEach((n) => {
-    const xCanvas = n.xCanvas ?? n.x;
-    if (typeof xCanvas !== "number" || Number.isNaN(xCanvas)) return;
+    const x = marginLeft + col * (measureW + gapX);
+    const y = top + row * rowGap;
 
-    const layoutX = canvasXToLayoutX(xCanvas);
+    // 每小节一个 stave
+    const stave = new VF.Stave(x, y, measureW);
 
-    const note = buildStaveNote(n, context);
-
-    note.setStave(scoreStave);
-    note.setContext(context);
-
-    const tc = new VF.TickContext();
-    tc.addTickable(note);
-    tc.preFormat();
-    tc.setX(layoutX);
-
-    note.draw();
-
-    const bb = note.getBoundingBox?.();
-    if (bb) {
-      const centerCanvasX = bb.getX() + bb.getW() / 2;
-      const dxCanvas = xCanvas - centerCanvasX;
-      measured.push({ ...n, layoutXFinal: layoutX + dxCanvas });
-    } else {
-      measured.push({ ...n, layoutXFinal: layoutX });
+    // 第一小节画 clef/key/time
+    if (i === 0) {
+      scoreStave = stave;
+      stave.addClef(scoreConfig.value.clef);
+      if (scoreConfig.value.keySig)
+        stave.addKeySignature(scoreConfig.value.keySig);
+      if (scoreConfig.value.timeSig)
+        stave.addTimeSignature(scoreConfig.value.timeSig);
     }
-  });
 
-  // ------------ 第二遍：清屏重画谱表 + 按补偿后的 layoutXFinal 正式画 ------------
-  scoreCtx.clearRect(0, 0, cssW, cssH);
-  scoreStave.setContext(context).draw();
+    // 小节线
+    stave.setEndBarType(VF.Barline.type.SINGLE);
+    stave.setContext(context).draw();
 
-  measured.forEach((n) => {
-    const note = buildStaveNote(n, context);
+    if (!m.notes.length) return;
 
-    note.setStave(scoreStave);
-    note.setContext(context);
+    // 构建小节内 notes
+    const tickables = m.notes.map((n) => buildStaveNote(n, context, stave));
 
-    const tc = new VF.TickContext();
-    tc.addTickable(note);
-    tc.preFormat();
+    const voice = new VF.Voice({ num_beats: beats, beat_value: beatValue });
+    voice.setStrict(false); // MVP：允许没填满
+    voice.addTickables(tickables);
 
-    // 最终位置：中心对齐后的 layoutX
-    tc.setX(n.layoutXFinal);
-    note.draw();
+    new VF.Formatter().joinVoices([voice]).format([voice], measureW - 20);
+    voice.draw(context, stave);
   });
 }
 
@@ -699,7 +736,9 @@ function getCanvasPoint(e) {
 
 // =============== 用户点主谱面：y 决定音高 + 当前选中 duration 决定时值 ===============
 function onScoreTap(e) {
-  if (!selected.value || !scoreStave) return;
+  if (!selected.value) return;
+  if (!scoreStave) redrawScore(); // 确保映射用谱表存在（首次进入）
+  if (!scoreStave) return;
 
   const p = getCanvasPoint(e);
   if (!p) return;
@@ -713,23 +752,22 @@ function onScoreTap(e) {
   console.log("naturalKey", naturalKey, "key", key);
 
   // x → 限制在可写区域（避开谱号/拍号）
-  const minX = scoreStave.getNoteStartX?.() ?? 60;
-  const maxX = scoreStave.getX() + scoreStave.getWidth() - 10;
-  const x = Math.max(minX, Math.min(maxX, p.x));
-  // console.log("点击了", x, minX, maxX, p.x);
-  // const xPlaced = placeXAvoidOverlap(x);
-  // === 碰撞检测：冲突就提示，不自动挪位置 ===
-  if (isCollidingAtX(x)) {
-    uni.showToast({
-      title: `离已有音符太近，请重新选择位置`,
-      icon: "none",
-      duration: 1200,
-    });
-    return;
-  }
+  // const minX = scoreStave.getNoteStartX?.() ?? 60;
+  // const maxX = scoreStave.getX() + scoreStave.getWidth() - 10;
+  // const x = Math.max(minX, Math.min(maxX, p.x));
+  // // console.log("点击了", x, minX, maxX, p.x);
+  // // const xPlaced = placeXAvoidOverlap(x);
+  // // === 碰撞检测：冲突就提示，不自动挪位置 ===
+  // if (isCollidingAtX(x)) {
+  //   uni.showToast({
+  //     title: `离已有音符太近，请重新选择位置`,
+  //     icon: "none",
+  //     duration: 1200,
+  //   });
+  //   return;
+  // }
 
-  notes.value.push({
-    xCanvas: x,
+  addNoteToMeasures({
     key,
     duration: selected.value.duration,
     dots: selectedDots.value ?? 0,
