@@ -2,13 +2,21 @@
   <scroll-view scroll-x class="score-scroll-container">
     <!-- 绑定 dynamicHeight -->
     <view class="canvas-wrapper" :style="{ width: scoreWidth + 'px', height: dynamicHeight + 'px' }">
-      <canvas id="scoreCanvas" canvas-id="scoreCanvas" type="2d" :style="{ width: scoreWidth + 'px', height: dynamicHeight + 'px' }" />
+      <canvas id="scoreCanvas" canvas-id="scoreCanvas" type="2d" :style="{ width: scoreWidth + 'px', height: dynamicHeight + 'px' }" @touchstart="onCanvasClick" />
     </view>
   </scroll-view>
 
   <image v-if="isDragging" class="drag-ghost" :style="ghostStyle" :src="selected.icon" mode="aspectFit" />
-  <view class="add" @clcik="addStave">新增一行</view>
-  <!-- 底部工具栏保持不变 -->
+
+  <view class="control-panel">
+    <view class="add-btn" @click="addStave">
+      <text style="font-size: 16px; margin-right: 4px">+</text>
+      新增一行乐谱
+    </view>
+    <view class="info-text">当前选中：第 {{ activeStaveIndex + 1 }} 行</view>
+  </view>
+
+  <!-- 音符工具栏 -->
   <view class="note-bar">
     <view
       v-for="d in durations"
@@ -20,25 +28,50 @@
       @touchmove="onDragMove"
       @touchend="onDragEnd"
     >
-      <image class="note-icon" v-if="d.icon" :src="d.icon" mode="aspectFit" />
+      <!-- <image class="note-icon" v-if="d.icon" :src="d.icon" mode="aspectFit" /> -->
       <view class="note-label">{{ d.label }}</view>
     </view>
   </view>
-  <view class="musicConfig">
+
+  <!-- 配置区域：操作的是当前选中的 Stave -->
+  <view class="musicConfig" v-if="activeStaveConfig">
+    <view class="section-title">谱号 (Clef)</view>
     <view class="clef">
-      <view class="item" @click="musicConfig.clef = item.id" v-for="item in clefList">{{ item.label }}</view>
+      <view class="item" :class="{ active: activeStaveConfig.clef === item.value }" @click="updateStaveConfig('clef', item.value)" v-for="item in clefList" :key="item.value">
+        {{ item.label }}
+      </view>
     </view>
+
+    <view class="section-title">拍号 (Time Signature)</view>
     <view class="timeSignatureList">
-      <view class="item" @click="musicConfig.timeSignature = item.id" v-for="item in timeSignatureList">{{ item.id }}</view>
+      <view
+        class="item"
+        :class="{ active: activeStaveConfig.timeSignature === item.id }"
+        @click="updateStaveConfig('timeSignature', item.id)"
+        v-for="item in timeSignatureList"
+        :key="item.id"
+      >
+        {{ item.id }}
+      </view>
     </view>
+
+    <view class="section-title">调号 (Key Signature)</view>
     <view class="keySignatureList">
-      <view class="item" @click="musicConfig.keySignature = item.id" v-for="item in keySignatureList">{{ item.id }}</view>
+      <view
+        class="item"
+        :class="{ active: activeStaveConfig.keySignature === item.id }"
+        @click="updateStaveConfig('keySignature', item.id)"
+        v-for="item in keySignatureList"
+        :key="item.id"
+      >
+        {{ item.id }}
+      </view>
     </view>
   </view>
 </template>
 
 <script setup>
-import { onMounted, getCurrentInstance, ref } from 'vue';
+import { onMounted, getCurrentInstance, ref, computed, nextTick } from 'vue';
 import Vex from 'vexflow';
 
 // --- 基础配置 ---
@@ -49,157 +82,100 @@ const ghostStyle = ref('');
 const scoreWidth = ref(400);
 let canvasNode = null;
 let globalCtx = null;
-let visualNoteMap = [];
 
-// 动态布局变量
-const dynamicStaveY = ref(60);
-const dynamicHeight = ref(200);
+// 画布高度动态计算
+const dynamicHeight = ref(300);
 
-// 全局音乐配置
-const musicConfig = {
-  clef: 'treble',
-  keySignature: 'C',
-  timeSignature: '4/4'
-};
+// --- 多行数据结构 ---
+// Stave 列表
+const staveList = ref([createDefaultStave(1)]);
+
+// 当前选中的 Stave ID
+const activeStaveId = ref(1);
+
+// 映射表
+let visualMaps = {};
+let layoutMaps = {};
+
+// 计算属性
+const activeStaveIndex = computed(() => staveList.value.findIndex((s) => s.id === activeStaveId.value));
+// 增加空值保护，防止模板渲染报错
+const activeStaveConfig = computed(() => {
+  const stave = staveList.value.find((s) => s.id === activeStaveId.value);
+  return stave ? stave.config : { clef: 'treble', keySignature: 'C', timeSignature: '4/4' };
+});
+
+// --- 常量定义 ---
 const clefList = [
-  {
-    value: 'treble',
-    label: '高音谱号'
-  },
-  {
-    value: 'bass',
-    label: '低音谱号'
-  },
-  {
-    value: 'alto',
-    label: '中音谱号'
-  },
-  {
-    value: 'tenor',
-    label: '次中音谱号'
-  }
+  { value: 'treble', label: '高音' },
+  { value: 'bass', label: '低音' },
+  { value: 'alto', label: '中音' },
+  { value: 'tenor', label: '次中音' }
 ];
-const timeSignatureList = [
-  {
-    id: '4/4',
-    label: '四四拍'
-  },
-  {
-    id: '3/4',
-    label: '三四拍'
-  },
-  {
-    id: '2/4',
-    label: '二四拍'
-  },
-  {
-    id: '6/8',
-    label: '六八拍'
-  },
-  {
-    id: '3/8',
-    label: '三八拍'
-  },
-  {
-    id: '2/2',
-    label: '二二拍'
-  },
-  {
-    id: '9/8',
-    label: '九八拍'
-  },
-  {
-    id: '12/8',
-    label: '十二八拍'
-  },
-  {
-    id: '1/4',
-    label: '一四拍'
-  }
-];
+const timeSignatureList = [{ id: '4/4' }, { id: '3/4' }, { id: '2/4' }, { id: '6/8' }, { id: '3/8' }, { id: '2/2' }, { id: '9/8' }, { id: '12/8' }];
 const keySignatureList = [
-  // 无升降号
-  {
-    id: 'C',
-    label: 'C大调/Am小调'
-  },
-  // 升号调（1-7个升号）
-  {
-    id: 'G',
-    label: 'G大调/Em小调（1个升号）'
-  },
-  {
-    id: 'D',
-    label: 'D大调/Bm小调（2个升号）'
-  },
-  {
-    id: 'A',
-    label: 'A大调/F#m小调（3个升号）'
-  },
-  {
-    id: 'E',
-    label: 'E大调/C#m小调（4个升号）'
-  },
-  {
-    id: 'B',
-    label: 'B大调/G#m小调（5个升号）'
-  },
-  {
-    id: 'F#',
-    label: 'F#大调/D#m小调（6个升号）'
-  },
-  {
-    id: 'C#',
-    label: 'C#大调/A#m小调（7个升号）'
-  },
-  // 降号调（1-7个降号）
-  {
-    id: 'F',
-    label: 'F大调/Dm小调（1个降号）'
-  },
-  {
-    id: 'Bb',
-    label: 'Bb大调/Gm小调（2个降号）'
-  },
-  {
-    id: 'Eb',
-    label: 'Eb大调/Cm小调（3个降号）'
-  },
-  {
-    id: 'Ab',
-    label: 'Ab大调/Fm小调（4个降号）'
-  },
-  {
-    id: 'Db',
-    label: 'Db大调/Bbm小调（5个降号）'
-  },
-  {
-    id: 'Gb',
-    label: 'Gb大调/Em小调（6个降号）'
-  },
-  {
-    id: 'Cb',
-    label: 'Cb大调/Abm小调（7个降号）'
-  }
+  { id: 'C' },
+  { id: 'G' },
+  { id: 'D' },
+  { id: 'A' },
+  { id: 'E' },
+  { id: 'B' },
+  { id: 'F#' },
+  { id: 'F' },
+  { id: 'Bb' },
+  { id: 'Eb' },
+  { id: 'Ab' },
+  { id: 'Db' },
+  { id: 'Gb' }
 ];
 const durations = [
   { id: 'w', label: '全音符', duration: 'w', icon: '/static/icons/notes/w.png' },
-  { id: 'h', label: '2分音符', duration: 'h', icon: '/static/icons/notes/h.png' },
-  { id: 'q', label: '4分音符', duration: 'q', icon: '/static/icons/notes/q.png' },
-  { id: '8', label: '8分音符', duration: '8', icon: '/static/icons/notes/8.png' },
-  { id: '16', label: '16分音符', duration: '16', icon: '/static/icons/notes/16.png' },
-  { id: '32', label: '32分音符', duration: '32', icon: '/static/icons/notes/16.png' },
-  { id: '64', label: '64分音符', duration: '64', icon: '/static/icons/notes/16.png' },
-  { id: 'wr', label: '休止符', duration: 'wr' }
+  { id: 'h', label: '2分', duration: 'h', icon: '/static/icons/notes/h.png' },
+  { id: 'q', label: '4分', duration: 'q', icon: '/static/icons/notes/q.png' },
+  { id: '8', label: '8分', duration: '8', icon: '/static/icons/notes/8.png' },
+  { id: '16', label: '16分', duration: '16', icon: '/static/icons/notes/16.png' },
+  { id: '32', label: '32分', duration: '32', icon: '/static/icons/notes/16.png' },
+  { id: '64', label: '64分', duration: '64', icon: '/static/icons/notes/16.png' },
+  { id: 'qr', label: '休止', duration: 'qr', icon: '/static/icons/notes/16.png' }
 ];
 
-const rawNotes = [];
 const selected = ref(durations[2]);
 let VF = null;
 
 // ============================================================
-// Context 补丁
+// 初始化与工具
 // ============================================================
+
+function createDefaultStave(id) {
+  return {
+    id: id || Date.now(),
+    config: {
+      clef: 'treble',
+      keySignature: 'C',
+      timeSignature: '4/4'
+    },
+    notes: []
+  };
+}
+
+function addStave() {
+  const newId = Date.now();
+  staveList.value.push(createDefaultStave(newId));
+  activeStaveId.value = newId;
+  // 等待数据更新后重绘
+  nextTick(() => {
+    drawScore();
+  });
+}
+
+function updateStaveConfig(key, value) {
+  const stave = staveList.value.find((s) => s.id === activeStaveId.value);
+  if (stave) {
+    stave.config[key] = value;
+    drawScore();
+  }
+}
+
 function applyContextPatch(ctx) {
   const mapProp = (methodName, propName) => {
     if (!ctx[methodName]) {
@@ -254,13 +230,11 @@ function initCanvas() {
     .fields({ node: true, size: true })
     .exec((res) => {
       if (!res[0]) return;
-      const { node, width, height } = res[0];
+      const { node, width } = res[0];
       const ctx = node.getContext('2d');
-      const windowInfo = uni.getWindowInfo();
-      const dpr = windowInfo.pixelRatio || 2;
+      const dpr = uni.getWindowInfo().pixelRatio || 2;
 
       applyContextPatch(ctx);
-
       node.width = width * dpr;
       node.height = dynamicHeight.value * dpr;
       ctx.scale(dpr, dpr);
@@ -271,6 +245,31 @@ function initCanvas() {
 
       drawScore();
     });
+}
+
+// ============================================================
+// 交互：点击 & 拖拽
+// ============================================================
+
+function onCanvasClick(e) {
+  // 增加触摸点检测的安全性
+  const touch = e.touches && e.touches[0];
+  if (!touch) return;
+
+  const rectQuery = uni.createSelectorQuery().in(instance.proxy).select('#scoreCanvas').boundingClientRect();
+  rectQuery.exec((res) => {
+    if (!res[0]) return;
+    const y = touch.pageY - res[0].top;
+
+    for (let id in layoutMaps) {
+      const layout = layoutMaps[id];
+      if (y >= layout.y - 40 && y <= layout.y + layout.height + 40) {
+        activeStaveId.value = parseInt(id);
+        break;
+      }
+    }
+    drawScore();
+  });
 }
 
 function onDragStart(e, d) {
@@ -304,114 +303,170 @@ function onDragEnd(e) {
     const y = touch.pageY - rect.top;
 
     if (x >= 0 && x <= rect.width && y >= 0 && y <= rect.height) {
-      const currentY = dynamicStaveY.value || 60;
-      const tempStave = new VF.Stave(0, currentY, 400);
+      let targetStaveId = null;
+      let targetLayout = null;
+      for (let id in layoutMaps) {
+        const layout = layoutMaps[id];
+        if (y >= layout.y - 50 && y <= layout.y + layout.height + 50) {
+          targetStaveId = parseInt(id);
+          targetLayout = layout;
+          break;
+        }
+      }
 
-      const pitch = calculatePitchFromY(y, tempStave);
-      insertNoteAtPosition(x, pitch, selected.value.duration);
-      drawScore();
+      if (targetStaveId) {
+        activeStaveId.value = targetStaveId;
+        const staveObj = staveList.value.find((s) => s.id === targetStaveId);
+
+        if (staveObj) {
+          const tempStave = new VF.Stave(0, targetLayout.y, 400);
+          // 修复：确保 Clef 存在，默认为 treble
+          tempStave.addClef(staveObj.config.clef || 'treble');
+
+          const pitch = calculatePitchFromY(y, tempStave, staveObj.config);
+          insertNoteToStave(targetStaveId, x, pitch, selected.value.duration);
+          drawScore();
+        }
+      }
     }
     isDragging.value = false;
     ghostStyle.value = '';
   });
 }
 
-// ============================================================
-// 修复 1: 优化插入逻辑 (避免覆盖)
-// ============================================================
-function insertNoteAtPosition(targetX, pitch, duration) {
-  if (visualNoteMap.length === 0) {
-    rawNotes.push({ pitch, duration, id: Date.now() });
+function insertNoteToStave(staveId, targetX, pitch, duration) {
+  const stave = staveList.value.find((s) => s.id === staveId);
+  if (!stave) return;
+
+  const notes = stave.notes;
+  const visualMap = visualMaps[staveId] || [];
+
+  if (visualMap.length === 0) {
+    notes.push({ pitch, duration, id: Date.now() });
     return;
   }
-
-  // 默认追加到最后
-  let insertIndex = rawNotes.length;
-
-  // 寻找最佳插入点
-  for (let i = 0; i < visualNoteMap.length; i++) {
-    const visualNote = visualNoteMap[i];
-
-    // 简单的距离判定：
-    // 如果点击在音符左侧，或者点击位置距离音符中心偏左，就插在它前面
-    // 这里加了 15px 的模糊范围，让判定更自然
+  let insertIndex = notes.length;
+  for (let i = 0; i < visualMap.length; i++) {
+    const visualNote = visualMap[i];
     if (targetX < visualNote.x + 10) {
       insertIndex = visualNote.rawIndex;
       break;
     }
   }
-
   const newNote = { pitch, duration, id: Date.now() };
-
-  // 安全检查
   if (insertIndex < 0) insertIndex = 0;
-  if (insertIndex > rawNotes.length) insertIndex = rawNotes.length;
-
-  rawNotes.splice(insertIndex, 0, newNote);
+  if (insertIndex > notes.length) insertIndex = notes.length;
+  notes.splice(insertIndex, 0, newNote);
 }
 
-function calculatePitchFromY(y, stave) {
+/**
+ * 核心算法：根据 Y 坐标 + 谱号 + 调号，计算出准确的音高
+ * 修复：移除对 VexFlow 内部方法的依赖，使用本地字典查表，解决 accidentalList 报错
+ */
+function calculatePitchFromY(y, stave, config) {
+  const { clef, keySignature } = config;
+
+  // 1. 获取五线谱 Line
   const line = stave.getLineForY(y);
-  const lineValue = Math.round(line * 2) / 2;
-  const stepsFromC4 = Math.round((5 - lineValue) * 2);
-  const octave = 4 + Math.floor(stepsFromC4 / 7);
-  const noteIndex = stepsFromC4 % 7;
-  const safeNoteIndex = noteIndex < 0 ? 7 + noteIndex : noteIndex;
-  const scale = ['C', 'D', 'E', 'F', 'G', 'A', 'B'];
-  return `${scale[safeNoteIndex]}/${octave}`;
-}
 
-// ============================================================
-// 修复 2: 核心 BUG 修复 (防止全音符后吞音符)
-// ============================================================
-function processMusicData() {
-  const measures = [];
-  let currentMeasure = { notes: [], ties: [], beams: [] };
-  let currentBeats = 0;
+  // 2. 确定基准音
+  let bottomLineNote = { step: 'E', octave: 4 }; // Treble
+  if (clef === 'bass') bottomLineNote = { step: 'G', octave: 2 };
+  if (clef === 'alto') bottomLineNote = { step: 'F', octave: 3 };
+  if (clef === 'tenor') bottomLineNote = { step: 'D', octave: 3 };
 
-  const RESOLUTION = VF.RESOLUTION;
-  const ticksPerBeat = RESOLUTION / 4;
-  const maxTicksPerMeasure = ticksPerBeat * 4;
+  const noteNames = ['C', 'D', 'E', 'F', 'G', 'A', 'B'];
+  const bottomLineIndex = bottomLineNote.octave * 7 + noteNames.indexOf(bottomLineNote.step);
+  const visualSteps = Math.round((4 - line) * 2);
+  const targetIndex = bottomLineIndex + visualSteps;
 
-  // 1. 【修复点 A】补充 32、64 和休止符的 Ticks 映射
-  const durationTicks = {
-    w: ticksPerBeat * 4,
-    h: ticksPerBeat * 2,
-    q: ticksPerBeat,
-    8: ticksPerBeat / 2,
-    16: ticksPerBeat / 4,
-    32: ticksPerBeat / 8, // 新增
-    64: ticksPerBeat / 16, // 新增
-    qr: ticksPerBeat, // 新增：四分休止符 (长度等于四分音符)
-    hr: ticksPerBeat * 2,
-    wr: ticksPerBeat * 4,
-    '8r': ticksPerBeat / 2,
-    '16r': ticksPerBeat / 4,
-    '32r': ticksPerBeat / 8,
-    '64r': ticksPerBeat / 16
-    // 如果你有其他休止符，也要加在这里，比如 '8r': ticksPerBeat/2
+  const octave = Math.floor(targetIndex / 7);
+  const stepIndex = targetIndex % 7;
+  const safeStepIndex = stepIndex < 0 ? 7 + stepIndex : stepIndex;
+  const noteName = noteNames[safeStepIndex];
+
+  // 3. 【修复】使用本地字典判断调号影响，不再调用 VexFlow 实例方法
+
+  // 定义哪些调是升号调，哪些是降号调，以及受影响的音名列表
+  const KEY_DATA = {
+    C: { type: '', notes: [] },
+
+    // 升号调 (#)
+    G: { type: '#', notes: ['F'] },
+    D: { type: '#', notes: ['F', 'C'] },
+    A: { type: '#', notes: ['F', 'C', 'G'] },
+    E: { type: '#', notes: ['F', 'C', 'G', 'D'] },
+    B: { type: '#', notes: ['F', 'C', 'G', 'D', 'A'] },
+    'F#': { type: '#', notes: ['F', 'C', 'G', 'D', 'A', 'E'] },
+    'C#': { type: '#', notes: ['F', 'C', 'G', 'D', 'A', 'E', 'B'] },
+
+    // 降号调 (b)
+    F: { type: 'b', notes: ['B'] },
+    Bb: { type: 'b', notes: ['B', 'E'] },
+    Eb: { type: 'b', notes: ['B', 'E', 'A'] },
+    Ab: { type: 'b', notes: ['B', 'E', 'A', 'D'] },
+    Db: { type: 'b', notes: ['B', 'E', 'A', 'D', 'G'] },
+    Gb: { type: 'b', notes: ['B', 'E', 'A', 'D', 'G', 'C'] },
+    Cb: { type: 'b', notes: ['B', 'E', 'A', 'D', 'G', 'C', 'F'] }
   };
 
-  // 2. 【修复点 B】补充反向查询，支持更小的单位
+  const currentKeyData = KEY_DATA[keySignature] || KEY_DATA['C'];
+  let acc = '';
+
+  // 如果当前音名在受影响的列表里，自动加升降号
+  if (currentKeyData.notes.includes(noteName)) {
+    acc = currentKeyData.type;
+  }
+
+  return `${noteName}${acc}/${octave}`;
+}
+// ============================================================
+// 数据处理逻辑 (支持动态拍号 + 动态谱号)
+// ============================================================
+// 1. 增加 clef 参数，默认为 treble
+function processNotesToMeasures(rawNotes, timeSignature = '4/4', clef = 'treble') {
+  const measures = [];
+  let currentMeasure = { notes: [], ties: [], beams: [] };
+  let currentTicks = 0;
+
+  const RESOLUTION = VF.RESOLUTION;
+  const [numStr, denStr] = timeSignature.split('/');
+  const num = parseInt(numStr) || 4;
+  const den = parseInt(denStr) || 4;
+  const ticksPerBeatUnit = RESOLUTION / den;
+  const maxTicksPerMeasure = ticksPerBeatUnit * num;
+
+  const durationTicks = {
+    w: RESOLUTION,
+    h: RESOLUTION / 2,
+    q: RESOLUTION / 4,
+    8: RESOLUTION / 8,
+    16: RESOLUTION / 16,
+    32: RESOLUTION / 32,
+    64: RESOLUTION / 64,
+    qr: RESOLUTION / 4,
+    hr: RESOLUTION / 2,
+    wr: RESOLUTION,
+    '8r': RESOLUTION / 8,
+    '16r': RESOLUTION / 16,
+    '32r': RESOLUTION / 32,
+    '64r': RESOLUTION / 64
+  };
   function getBestDuration(ticks) {
     if (ticks >= durationTicks['w']) return 'w';
     if (ticks >= durationTicks['h']) return 'h';
     if (ticks >= durationTicks['q']) return 'q';
     if (ticks >= durationTicks['8']) return '8';
     if (ticks >= durationTicks['16']) return '16';
-    if (ticks >= durationTicks['32']) return '32'; // 新增
-    return '64'; // 最小兜底
+    if (ticks >= durationTicks['32']) return '32';
+    return '64';
   }
 
-  // 构建队列
   let noteQueue = rawNotes.map((n, index) => ({
     pitch: n.pitch,
     rawDuration: n.duration,
-    // 关键：如果字典里查不到(比如'qr')，会变成 undefined，导致后面报错或走兜底
-    // 这里确保 'qr' 能查到 4096
     totalTicks: durationTicks[n.duration] || durationTicks['q'],
     rawIndex: index,
-    // 标记是否为休止符 (只要 duration 包含 'r' 就算)
     isRest: n.duration.indexOf('r') !== -1
   }));
 
@@ -420,297 +475,290 @@ function processMusicData() {
 
   while (noteIndex < noteQueue.length || pendingNote) {
     let item = pendingNote || noteQueue[noteIndex];
-    const ticksSpace = maxTicksPerMeasure - currentBeats;
+    const ticksSpace = maxTicksPerMeasure - currentTicks;
 
-    // 换行逻辑
-    if (ticksSpace <= 0) {
-      // 甚至可以用 < 10 来容错
+    if (ticksSpace <= 10) {
       measures.push(currentMeasure);
       currentMeasure = { notes: [], ties: [], beams: [] };
-      currentBeats = 0;
+      currentTicks = 0;
       continue;
     }
 
-    if (!pendingNote) {
-      noteIndex++;
-    }
+    if (!pendingNote) noteIndex++;
 
-    // 3. 【修复点 C】生成 VexFlow 音符时的特殊处理
-    // 封装一个创建音符的辅助函数，处理休止符逻辑
     const createVexNote = (ticks, originalItem) => {
-      // 根据 ticks 算出最佳时值 (如 'q', '8')
       let baseDuration = getBestDuration(ticks);
-
-      // 如果原始数据是休止符，要在时值后面加 'r' (例如 'q' -> 'qr')
-      // 并且 key 必须设为默认值 (如 "b/4")
       let vfKeys = [originalItem.pitch];
       let vfDuration = baseDuration;
 
+      // 休止符位置处理
       if (originalItem.isRest) {
-        vfKeys = ['b/4']; // 休止符通常画在中间
-        vfDuration = baseDuration + 'r'; // VexFlow 格式: "qr", "8r"
+        // 根据谱号调整休止符的默认位置，让它好看点
+        // 默认 b/4 在高音谱号是中间，但在低音谱号可能偏了，通常 b/4 是通用的中间线
+        vfKeys = ['b/4'];
+        vfDuration = baseDuration + 'r';
       }
 
-      const note = new VF.StaveNote({
+      return new VF.StaveNote({
         keys: vfKeys,
         duration: vfDuration,
-        auto_stem: !originalItem.isRest // 休止符不需要符干
+        auto_stem: !originalItem.isRest,
+        clef: clef // 【关键修改】：告诉音符当前的谱号
       });
-
-      // 如果是休止符，通常加点样式或位置微调（可选）
-      if (originalItem.isRest) {
-        // 可以在这里做休止符的垂直居中微调，一般 b/4 就够了
-      }
-
-      return note;
     };
 
-    if (item.totalTicks <= ticksSpace) {
-      // === 情况 A: 能放下 ===
+    if (item.totalTicks <= ticksSpace + 10) {
       const vfNote = createVexNote(item.totalTicks, item);
-
       vfNote.sourceRawIndex = item.rawIndex;
       currentMeasure.notes.push(vfNote);
-      currentBeats += item.totalTicks;
-
-      if (item.isLinkedToPrevious && !item.isRest) {
-        vfNote.isIncomingTie = true;
-      }
-
+      currentTicks += item.totalTicks;
+      if (item.isLinkedToPrevious && !item.isRest) vfNote.isIncomingTie = true;
       pendingNote = null;
     } else {
-      // === 情况 B: 放不下，拆分 ===
-      // 注意：休止符通常尽量不拆分（乐理上休止符跨小节一般不连线，而是写成两个休止符）
-      // 这里沿用统一拆分逻辑，VexFlow 会画出两个休止符，没问题
-
       const firstPartTicks = ticksSpace;
       const remainTicks = item.totalTicks - ticksSpace;
-
       const note1 = createVexNote(firstPartTicks, item);
       note1.sourceRawIndex = item.rawIndex;
-
       currentMeasure.notes.push(note1);
-      currentBeats += firstPartTicks;
+      currentTicks += firstPartTicks;
 
       pendingNote = {
         pitch: item.pitch,
-        rawDuration: item.rawDuration, // 保持原始 duration 字符串 (含 'r')
+        rawDuration: item.rawDuration,
         totalTicks: remainTicks,
         isLinkedToPrevious: true,
         rawIndex: item.rawIndex,
         isRest: item.isRest
       };
-
-      // 休止符不画延音线 (Tie)
       if (!item.isRest) {
         currentMeasure.ties.push({ fromNote: note1, isCrossMeasure: true });
       }
     }
   }
-
   if (currentMeasure.notes.length > 0 || measures.length === 0) {
     measures.push(currentMeasure);
   }
-
-  // 生成 Beams (休止符不参与连线)
   measures.forEach((m) => {
-    // 过滤掉休止符再计算 Beam
     const notesToBeam = m.notes.filter((n) => !n.duration.includes('r'));
-    if (notesToBeam.length > 0) {
-      // 这里的 generateBeams 需要连续的音符列表，直接传 filter 后的可能导致隔着休止符连线
-      // 更严谨的做法是按组 Beam，简单起见 VexFlow 通常能处理
-      m.beams = VF.Beam.generateBeams(notesToBeam);
-    }
+    if (notesToBeam.length > 0) m.beams = VF.Beam.generateBeams(notesToBeam);
   });
-
   return measures;
 }
 
+// ============================================================
+// 渲染主循环
+// ============================================================
 function drawScore() {
   if (!VF || !canvasNode || !globalCtx) return;
   const ctx = globalCtx;
+  visualMaps = {};
+  layoutMaps = {};
 
-  visualNoteMap = [];
-  const measures = processMusicData();
+  let currentStaveY = 50;
+  let maxRequiredWidth = 0;
+  const renderDataList = [];
 
-  // --- 阶段 1: 预计算布局 (Calculate Layout) ---
-  let calculatedWidths = [];
-  let totalRequiredWidth = 10;
+  staveList.value.forEach((staveObj) => {
+    const measures = processNotesToMeasures(
+      staveObj.notes,
+      staveObj.config.timeSignature,
+      staveObj.config.clef // <--- 传入谱号
+    );
+    const calculatedWidths = [];
+    let rowWidth = 10;
+    let rowMinY = 0;
+    let rowMaxY = 80;
 
-  let globalMinY = 0;
-  let globalMaxY = 100;
+    measures.forEach((measure, index) => {
+      const dummyStave = new VF.Stave(0, 0, 500);
+      if (index === 0) {
+        dummyStave.addClef(staveObj.config.clef).addKeySignature(staveObj.config.keySignature).addTimeSignature(staveObj.config.timeSignature);
+      }
+      const modifierWidth = dummyStave.getNoteStartX();
 
-  measures.forEach((measure, index) => {
-    // 1. Modifier (谱号/调号) 宽度计算
-    const dummyStave = new VF.Stave(0, 0, 500);
-    if (index === 0) {
-      dummyStave.addClef(musicConfig.clef).addKeySignature(musicConfig.keySignature).addTimeSignature(musicConfig.timeSignature);
-    }
-    const modifierWidth = dummyStave.getNoteStartX();
+      let minNoteWidth = 0;
+      let voice = null;
 
-    // 2. 音符内容宽度计算
-    let minNoteWidth = 0;
-    let voice = null;
+      if (measure.notes.length > 0) {
+        voice = new VF.Voice({ num_beats: 4, beat_value: 4 });
+        voice.setStrict(false);
+        voice.addTickables(measure.notes);
 
-    if (measure.notes.length > 0) {
-      voice = new VF.Voice({ num_beats: 4, beat_value: 4 });
-      voice.setStrict(false);
-      voice.addTickables(measure.notes);
-
-      const formatter = new VF.Formatter().joinVoices([voice]);
-
-      // 【关键步骤】让 VexFlow 算出如果不重叠，最小需要多少像素
-      formatter.preCalculateMinTotalWidth([voice]);
-      minNoteWidth = formatter.getMinTotalWidth();
-
-      // 用于计算高度 (BoundingBox)
-      formatter.format([voice], 500);
-
-      measure.notes.forEach((note) => {
-        note.setStave(dummyStave);
-        const box = note.getBoundingBox();
-        if (box) {
-          if (box.y < globalMinY) globalMinY = box.y;
-          if (box.y + box.h > globalMaxY) globalMaxY = box.y + box.h;
+        // 自动升降号 (Safety Check)
+        if (VF.Accidental) {
+          VF.Accidental.applyAccidentals([voice], staveObj.config.keySignature);
         }
+
+        const formatter = new VF.Formatter().joinVoices([voice]);
+        formatter.preCalculateMinTotalWidth([voice]);
+        minNoteWidth = formatter.getMinTotalWidth();
+        formatter.format([voice], 500);
+
+        measure.notes.forEach((note) => {
+          note.setStave(dummyStave);
+          const box = note.getBoundingBox();
+          if (box) {
+            if (box.y < rowMinY) rowMinY = box.y;
+            if (box.y + box.h > rowMaxY) rowMaxY = box.y + box.h;
+          }
+        });
+      } else {
+        minNoteWidth = 40;
+      }
+
+      let contentWidth = minNoteWidth + 30;
+      contentWidth = Math.max(contentWidth, 60);
+      let extraRightPadding = index === measures.length - 1 ? 80 : 10;
+      let measureWidth = modifierWidth + contentWidth + extraRightPadding;
+
+      calculatedWidths.push({
+        measureWidth,
+        formatWidth: contentWidth,
+        voice
       });
-    } else {
-      minNoteWidth = 40; // 空小节默认宽
-    }
-
-    // =======================================================
-    // 【核心优化】: 让 VexFlow 自己决定排版
-    // =======================================================
-
-    // 1. 呼吸空间：在“极限挤压宽度”的基础上，给 30px 的缓冲
-    // 这样音符不会贴在一起，也不会像之前那样隔得老远
-    let contentWidth = minNoteWidth + 30;
-
-    // 2. 最小保底：防止单音符小节太窄 (至少60px)
-    contentWidth = Math.max(contentWidth, 60);
-
-    // 3. 右侧留白 (Padding)
-    // 中间的小节给 10px 即可，最后一小节给 80px 拖拽区
-    let extraRightPadding = 10;
-    if (index === measures.length - 1) {
-      extraRightPadding = 80;
-    }
-
-    // 小节总宽 = 头部修饰宽 + 内容宽 + 右侧留白
-    let measureWidth = modifierWidth + contentWidth + extraRightPadding;
-
-    calculatedWidths.push({
-      measureWidth: measureWidth,
-      formatWidth: contentWidth, // 告诉 Formatter 用这个宽度去排版
-      modifierWidth: modifierWidth,
-      voice: voice
+      rowWidth += measureWidth;
     });
-    totalRequiredWidth += measureWidth;
+
+    if (rowWidth > maxRequiredWidth) maxRequiredWidth = rowWidth;
+
+    const topPadding = 30;
+    let offsetY = 0;
+    if (rowMinY < 0) offsetY = Math.abs(rowMinY) + topPadding;
+    const actualHeight = offsetY + rowMaxY + 30;
+
+    renderDataList.push({
+      staveObj,
+      measures,
+      calculatedWidths,
+      offsetY,
+      actualHeight
+    });
   });
 
-  // --- 阶段 2: 动态高度/宽度调整 (逻辑不变) ---
-  const topPadding = 20;
-  let newStaveY = 60;
-  if (globalMinY < 0) {
-    newStaveY = Math.abs(globalMinY) + topPadding;
-  }
-  const bottomPadding = 50;
-  let newHeight = newStaveY + globalMaxY + bottomPadding;
-  newHeight = Math.max(newHeight, 200);
+  const finalScoreWidth = Math.max(maxRequiredWidth + 50, 350);
+  let totalCanvasHeight = 50;
+  renderDataList.forEach((d) => (totalCanvasHeight += d.actualHeight));
+  totalCanvasHeight = Math.max(totalCanvasHeight, 300);
 
-  dynamicStaveY.value = newStaveY;
-  dynamicHeight.value = newHeight;
-
-  const finalScoreWidth = Math.max(totalRequiredWidth + 50, 350);
-
-  if (Math.abs(scoreWidth.value - finalScoreWidth) > 5 || Math.abs(canvasNode.height / (uni.getWindowInfo().pixelRatio || 2) - newHeight) > 5) {
+  if (Math.abs(scoreWidth.value - finalScoreWidth) > 5 || Math.abs(canvasNode.height / (uni.getWindowInfo().pixelRatio || 2) - totalCanvasHeight) > 5) {
     scoreWidth.value = finalScoreWidth;
+    dynamicHeight.value = totalCanvasHeight;
     const dpr = uni.getWindowInfo().pixelRatio || 2;
     canvasNode.width = finalScoreWidth * dpr;
-    canvasNode.height = newHeight * dpr;
+    canvasNode.height = totalCanvasHeight * dpr;
     ctx.scale(dpr, dpr);
     applyContextPatch(ctx);
   }
 
-  // --- 阶段 3: 绘制 (逻辑不变) ---
   ctx.clear();
-  let currentX = 10;
-  const yPos = dynamicStaveY.value;
+  let cursorY = 50;
 
-  let prevMeasureLastNote = null;
-  let needTieFromPrev = false;
+  renderDataList.forEach((data) => {
+    const { staveObj, measures, calculatedWidths, offsetY, actualHeight } = data;
+    const staveY = cursorY + offsetY;
+    layoutMaps[staveObj.id] = { y: staveY, height: actualHeight };
+    visualMaps[staveObj.id] = [];
 
-  measures.forEach((measure, index) => {
-    const layoutInfo = calculatedWidths[index];
-    const measureWidth = layoutInfo.measureWidth;
-
-    const stave = new VF.Stave(currentX, yPos, measureWidth);
-    if (index === 0) {
-      stave.addClef(musicConfig.clef).addKeySignature(musicConfig.keySignature).addTimeSignature(musicConfig.timeSignature);
+    // 选中高亮
+    if (staveObj.id === activeStaveId.value) {
+      ctx.save();
+      ctx.globalAlpha = 0.05;
+      ctx.fillStyle = '#1890ff';
+      ctx.fillRect(0, cursorY, finalScoreWidth, actualHeight);
+      ctx.restore();
     }
-    if (index === measures.length - 1) {
-      stave.setEndBarType(VF.Barline.type.END);
-    }
-    stave.setContext(ctx).draw();
 
-    const voice = layoutInfo.voice;
-    if (voice) {
-      // 使用计算好的 contentWidth 给 VexFlow 排版
-      const availableWidth = layoutInfo.formatWidth;
-      const formatter = new VF.Formatter().joinVoices([voice]);
+    let currentX = 10;
+    let prevMeasureLastNote = null;
+    let needTieFromPrev = false;
 
-      // 【关键】VexFlow 会自动在这个宽度内均匀分布音符
-      formatter.format([voice], availableWidth);
+    measures.forEach((measure, index) => {
+      const layoutInfo = calculatedWidths[index];
+      const measureWidth = layoutInfo.measureWidth;
 
-      voice.draw(ctx, stave);
+      const stave = new VF.Stave(currentX, staveY, measureWidth);
+      if (index === 0) {
+        stave.addClef(staveObj.config.clef).addKeySignature(staveObj.config.keySignature).addTimeSignature(staveObj.config.timeSignature);
+      }
+      if (index === measures.length - 1) {
+        stave.setEndBarType(VF.Barline.type.END);
+      }
+      stave.setContext(ctx).draw();
 
-      measure.notes.forEach((note) => {
-        let noteX = stave.getX() + 50;
-        try {
-          noteX = note.getAbsoluteX();
-        } catch (e) {}
-        if (note.sourceRawIndex !== undefined) {
-          visualNoteMap.push({ x: noteX, rawIndex: note.sourceRawIndex });
+      const voice = layoutInfo.voice;
+      if (voice) {
+        const availableWidth = layoutInfo.formatWidth;
+        const formatter = new VF.Formatter().joinVoices([voice]);
+        formatter.format([voice], availableWidth);
+        voice.draw(ctx, stave);
+
+        measure.notes.forEach((note) => {
+          let noteX = stave.getX() + 50;
+          try {
+            noteX = note.getAbsoluteX();
+          } catch (e) {}
+          if (note.sourceRawIndex !== undefined) {
+            visualMaps[staveObj.id].push({ x: noteX, rawIndex: note.sourceRawIndex });
+          }
+        });
+
+        if (measure.beams) measure.beams.forEach((b) => b.setContext(ctx).draw());
+        if (needTieFromPrev && prevMeasureLastNote) {
+          const firstNote = measure.notes[0];
+          if (firstNote) {
+            const tie = new VF.StaveTie({
+              first_note: prevMeasureLastNote,
+              last_note: firstNote,
+              first_indices: [0],
+              last_indices: [0]
+            });
+            tie.setContext(ctx).draw();
+          }
         }
-      });
-
-      if (measure.beams) measure.beams.forEach((b) => b.setContext(ctx).draw());
-
-      if (needTieFromPrev && prevMeasureLastNote) {
-        const firstNote = measure.notes[0];
-        if (firstNote) {
-          const tie = new VF.StaveTie({
-            first_note: prevMeasureLastNote,
-            last_note: firstNote,
-            first_indices: [0],
-            last_indices: [0]
-          });
-          tie.setContext(ctx).draw();
+        const crossTie = measure.ties.find((t) => t.isCrossMeasure);
+        if (crossTie) {
+          prevMeasureLastNote = crossTie.fromNote;
+          needTieFromPrev = true;
+        } else {
+          prevMeasureLastNote = null;
+          needTieFromPrev = false;
         }
       }
-
-      const crossTie = measure.ties.find((t) => t.isCrossMeasure);
-      if (crossTie) {
-        prevMeasureLastNote = crossTie.fromNote;
-        needTieFromPrev = true;
-      } else {
-        prevMeasureLastNote = null;
-        needTieFromPrev = false;
-      }
-    }
-    currentX += measureWidth;
+      currentX += measureWidth;
+    });
+    cursorY += actualHeight;
   });
 }
-// 新增一行
-const addStave = () => {};
 </script>
 
 <style scoped lang="scss">
-/* 样式保持不变 */
+/* 保持原有样式，新增部分如下 */
+.control-panel {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 10px;
+  background-color: #f8f9fa;
+  border-bottom: 1px solid #eee;
+}
+.add-btn {
+  background-color: #1890ff;
+  color: white;
+  padding: 6px 12px;
+  border-radius: 6px;
+  font-size: 14px;
+  display: flex;
+  align-items: center;
+}
+.info-text {
+  font-size: 12px;
+  color: #666;
+}
 .score-scroll-container {
   width: 100%;
   white-space: nowrap;
   background: #fff;
+  border-bottom: 1px solid #eee;
 }
 .canvas-wrapper {
   display: inline-block;
@@ -727,6 +775,7 @@ const addStave = () => {};
   padding: 5px;
   border: 1px solid #ccc;
   border-radius: 8px;
+  min-width: 60px;
 }
 .note-btn.active {
   background: #e6f7ff;
@@ -745,20 +794,32 @@ const addStave = () => {};
 }
 .musicConfig {
   width: 100%;
+  padding: 10px;
+  box-sizing: border-box;
+  .section-title {
+    font-size: 14px;
+    font-weight: bold;
+    margin: 10px 0 5px 0;
+    color: #333;
+  }
   .clef,
   .timeSignatureList,
   .keySignatureList {
-    margin: 20rpx 0;
     display: flex;
     flex-wrap: wrap;
-    gap: 10px;
+    gap: 8px;
     .item {
-      padding: 10rpx;
-      border: 1px solid #ccc;
+      padding: 6px 12px;
+      border: 1px solid #ddd;
+      border-radius: 4px;
+      font-size: 12px;
+      background: #fff;
+      &.active {
+        background: #1890ff;
+        color: #fff;
+        border-color: #1890ff;
+      }
     }
   }
-}
-.add {
-  margin: 20rpx 0;
 }
 </style>
