@@ -159,30 +159,26 @@ import Vex from "vexflow";
 const VF = Vex.Flow;
 const instance = getCurrentInstance();
 
-const MIN_NOTE_GAP = 18;
-const MAX_TRY_STEPS = 40;
+// ==========================================
+// 1. 基础常量与选项定义
+// ==========================================
+const MIN_MEASURE_WIDTH = 120; // 普通小节音符区最小宽度
+const MEASURE_PADDING_RIGHT = 30; // 小节末尾留白，防止音符挤到小节线上
+const TPQ = 480;
 
-let canvasTop = 0;
-let canvasLeft = 0;
-
-const canvasCssW = ref(0); // 总谱虚拟宽（给 scroll-view 占位）
-const canvasCssH = ref(300);
-const viewW = ref(0); // 视口宽
-
-let scrollLeftPx = 0;
-let scrollTimer = null;
-
-function onScoreScroll(e) {
-  const sl = e.detail?.scrollLeft ?? 0;
-  if (scrollTimer) return;
-  scrollTimer = setTimeout(() => {
-    scrollLeftPx = sl;
-    redrawScore();
-    scrollTimer = null;
-  }, 16);
+/** 动态计算第一小节头部符号的总宽度 */
+function getHeaderWidth() {
+  let width = 40; // 谱号
+  const keySig = scoreConfig.value?.keySig || "C";
+  const accInfo = KEY_SIG_ACC_COUNT[keySig] || { count: 0 };
+  width += accInfo.count * 10; // 调号
+  width += 35; // 拍号
+  return width;
 }
 
-// 音符时值
+// 第一小节初始总宽度
+const getFirstMeasureMinWidth = () => getHeaderWidth() + MIN_MEASURE_WIDTH;
+
 const durations = [
   {
     id: "w",
@@ -263,11 +259,12 @@ const keySigOptions = [
   { label: "Cb (7b)", value: "Cb" },
 ];
 
-const scoreConfig = ref({
-  clef: "treble",
-  timeSig: "4/4",
-  keySig: "C",
-});
+const clefOptions = [
+  { label: "高音谱号", value: "treble" },
+  { label: "低音谱号", value: "bass" },
+  { label: "中音谱号", value: "alto" },
+  { label: "次中音谱号", value: "tenor" },
+];
 
 const SHARP_ORDER = ["f", "c", "g", "d", "a", "e", "b"];
 const FLAT_ORDER = ["b", "e", "a", "d", "g", "c", "f"];
@@ -289,19 +286,26 @@ const KEY_SIG_ACC_COUNT = {
   Cb: { type: "flat", count: 7 },
 };
 
-const clefOptions = [
-  { label: "高音谱号", value: "treble" },
-  { label: "低音谱号", value: "bass" },
-  { label: "中音谱号", value: "alto" },
-  { label: "次中音谱号", value: "tenor" },
-];
-
+// ==========================================
+// 2. 响应式状态
+// ==========================================
+const scoreConfig = ref({ clef: "treble", timeSig: "4/4", keySig: "C" });
+const measures = ref([{ notes: [], used: 0, width: 230 }]); // 初始给定一个大概宽度
 const selected = ref(durations[2]);
-const measures = ref([{ notes: [], used: 0 }]);
 const selectedAccidental = ref(null);
 const selectedDots = ref(0);
 
-// canvas & renderer
+const canvasCssW = ref(0);
+const canvasCssH = ref(300);
+const viewW = ref(0);
+
+// ==========================================
+// 3. 内部变量
+// ==========================================
+let canvasTop = 0;
+let canvasLeft = 0;
+let scrollLeftPx = 0;
+let scrollTimer = null;
 let scoreNode = null;
 let scoreCtx = null;
 let scoreRenderer = null;
@@ -309,12 +313,358 @@ let scoreStave = null;
 let cssW = 0;
 let dpr = 1;
 
+// ==========================================
+// 4. 音乐理论与坐标计算工具
+// ==========================================
+
+function getNoteStartOffset(measureIndex) {
+  return measureIndex === 0 ? getHeaderWidth() : 20;
+}
+
+function updateMeasureWidth(measureIndex) {
+  const m = measures.value[measureIndex];
+  if (!m) return;
+  const headerW = getNoteStartOffset(measureIndex);
+  const minW = headerW + MIN_MEASURE_WIDTH;
+
+  const maxRelX =
+    m.notes.length > 0 ? Math.max(...m.notes.map((n) => n.relX || 0)) : 0;
+
+  m.width = Math.max(minW, headerW + maxRelX + MEASURE_PADDING_RIGHT);
+}
+
+function getMeasureX(measureIndex) {
+  let x = 10;
+  for (let i = 0; i < measureIndex; i++) {
+    x += measures.value[i].width || MIN_MEASURE_WIDTH;
+  }
+  return x;
+}
+
+function calcTotalScoreWidth() {
+  let total = 10;
+  measures.value.forEach((m) => (total += m.width || 200));
+  return total + 50;
+}
+
+function parseTimeSig(ts) {
+  const [a, b] = String(ts).split("/").map(Number);
+  return { beats: a || 4, beatValue: b || 4 };
+}
+
+function noteToTicks(duration, dots) {
+  const map = { w: 4, h: 2, q: 1, 8: 0.5, 16: 0.25, 32: 0.125, 64: 0.0625 };
+  const base = (map[duration] ?? 1) * TPQ;
+  return Math.round(base * (dots ? 1.5 : 1.0));
+}
+
+function getMeasureTicks() {
+  const { beats, beatValue } = parseTimeSig(scoreConfig.value.timeSig);
+  return Math.round(beats * (4 / beatValue) * TPQ);
+}
+
+function applyKeySigToKey(naturalKey, keySig) {
+  const info = KEY_SIG_ACC_COUNT[keySig] || { count: 0 };
+  const map = {};
+  const order = info.type === "sharp" ? SHARP_ORDER : FLAT_ORDER;
+  for (let i = 0; i < info.count; i++)
+    map[order[i]] = info.type === "sharp" ? "#" : "b";
+
+  const [letterRaw, octaveRaw] = String(naturalKey).split("/");
+  const letter = (letterRaw || "c").toLowerCase();
+  const acc = map[letter];
+  return acc
+    ? `${letter}${acc}/${octaveRaw || "4"}`
+    : `${letter}/${octaveRaw || "4"}`;
+}
+
+function getStemDirectionByKey(key) {
+  const midByClef = { treble: "b/4", bass: "d/3", alto: "c/4", tenor: "a/3" };
+  const mid = midByClef[scoreConfig.value.clef] || "b/4";
+  const toDiatonic = (k) => {
+    const m = String(k).match(/^([a-g])(bb|##|b|#|n)?\/(\d+)$/i);
+    return m
+      ? Number(m[3]) * 7 +
+          { c: 0, d: 1, e: 2, f: 3, g: 4, a: 5, b: 6 }[m[1].toLowerCase()]
+      : 0;
+  };
+  return toDiatonic(key) >= toDiatonic(mid) ? VF.Stem.DOWN : VF.Stem.UP;
+}
+
+function yToKey(y) {
+  if (!scoreStave) return "c/4";
+  const stepSize = scoreStave.getSpacingBetweenLines() / 2;
+  const bottomLineY = scoreStave.getYForLine(4);
+  let step = Math.round((bottomLineY - y) / stepSize);
+  const letters = ["c", "d", "e", "f", "g", "a", "b"];
+  const base =
+    { bass: "g/2", alto: "f/3", tenor: "d/3", treble: "e/4" }[
+      scoreConfig.value.clef
+    ] || "e/4";
+  let [bL, bO] = base.split("/");
+  let idx = letters.indexOf(bL),
+    oct = Number(bO);
+  for (let i = 0; i < Math.abs(step); i++) {
+    if (step > 0) {
+      idx++;
+      if (idx > 6) {
+        idx = 0;
+        oct++;
+      }
+    } else {
+      idx--;
+      if (idx < 0) {
+        idx = 6;
+        oct--;
+      }
+    }
+  }
+  return `${letters[idx]}/${oct}`;
+}
+
+/**
+ * 根据拍号返回 Beam 的分组规则
+ */
+function getBeamGroups(timeSig) {
+  const [beats, beatValue] = String(timeSig).split("/").map(Number);
+
+  if (beats === 6 && beatValue === 8) {
+    // 6/8 拍：每 3 个八分音符一组
+    return [new VF.Fraction(3, 8)];
+  } else if (beats === 12 && beatValue === 8) {
+    // 12/8 拍：每 3 个八分音符一组
+    return [new VF.Fraction(3, 8)];
+  } else if (beatValue === 4) {
+    // 2/4, 3/4, 4/4 拍：按 1 拍（2个八分音符）分组更整齐
+    return [new VF.Fraction(1, 4)];
+  }
+
+  return [new VF.Fraction(1, 4)]; // 默认
+}
+
+// ==========================================
+// 5. 核心绘图与渲染逻辑
+// ==========================================
+
+function ensureCanvasSize() {
+  if (!scoreNode || !scoreCtx) return;
+  canvasCssW.value = Math.max(viewW.value || 0, calcTotalScoreWidth());
+  scoreNode.width = Math.floor(viewW.value * dpr);
+  scoreNode.height = Math.floor(canvasCssH.value * dpr);
+  scoreCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
+}
+
+function buildStaveNote(n, context, stave) {
+  // 检查是否是短时值音符（需要连杠的）
+  const isBeamable = ["8", "16", "32", "64"].includes(n.duration);
+
+  const note = new VF.StaveNote({
+    clef: scoreConfig.value.clef,
+    keys: [n.key],
+    duration: n.duration,
+    // 如果是需要连杠的音符，初始方向给 AUTO (null)，让 Beam 逻辑去决定
+    stem_direction: isBeamable ? null : getStemDirectionByKey(n.key),
+  });
+
+  note.setContext(context).setStave(stave);
+  if (n.accidental) note.addModifier(new VF.Accidental(n.accidental), 0);
+  if (n.dots) VF.Dot.buildAndAttach([note], { all: true });
+  return note;
+}
+
+function redrawScore() {
+  if (!scoreRenderer || !scoreCtx) return;
+  ensureCanvasSize();
+
+  scoreCtx.clearRect(0, 0, viewW.value, canvasCssH.value);
+  const context = scoreRenderer.getContext();
+
+  let currentXAbs = 10;
+  measures.value.forEach((m, i) => {
+    updateMeasureWidth(i);
+    const measureW = m.width;
+    const x = currentXAbs - scrollLeftPx;
+    const y = 30;
+
+    if (x + measureW >= -50 && x <= viewW.value + 50) {
+      const stave = new VF.Stave(x, y, measureW);
+      if (i === 0) {
+        scoreStave = stave;
+        stave
+          .addClef(scoreConfig.value.clef)
+          .addKeySignature(scoreConfig.value.keySig)
+          .addTimeSignature(scoreConfig.value.timeSig);
+      }
+      stave.setEndBarType(
+        i === measures.value.length - 1
+          ? VF.Barline.type.END
+          : VF.Barline.type.SINGLE,
+      );
+      stave.setContext(context).draw();
+
+      if (m.notes?.length) {
+        const writingStart = stave.getNoteStartX();
+        const fallbackStart = stave.getX() + getNoteStartOffset(i);
+        const actualStart =
+          writingStart > stave.getX() ? writingStart : fallbackStart;
+
+        // 1. 【重要】按坐标对音符数据进行排序，防止连杠交叉
+        const sortedNoteData = [...m.notes].sort(
+          (a, b) => (a.relX || 0) - (b.relX || 0),
+        );
+
+        const staveNotes = [];
+        sortedNoteData.forEach((n) => {
+          const note = buildStaveNote(n, context, stave);
+
+          const tc = new VF.TickContext().addTickable(note).preFormat();
+          tc.setX(0);
+          note.setTickContext(tc);
+
+          const desiredAbsX = actualStart + (n.relX || 0);
+          const currentX = note.getAbsoluteX();
+          note.setXShift(desiredAbsX - currentX);
+
+          staveNotes.push(note);
+        });
+
+        // 2. 生成 Beam
+        try {
+          // 使用 generateBeams 时，第二个参数非常重要
+          const beams = VF.Beam.generateBeams(staveNotes, {
+            groups: getBeamGroups(scoreConfig.value.timeSig),
+            // 允许 Beam 自动修改音符的符干方向，以解决图片中“打架”的问题
+            maintain_stem_directions: false,
+          });
+
+          // 3. 先画音符
+          staveNotes.forEach((sn) => sn.setContext(context).draw());
+
+          // 4. 再画符杠
+          beams.forEach((b) => {
+            b.setContext(context).draw();
+          });
+        } catch (e) {
+          // 如果自动生成失败，回退到只画音符
+          staveNotes.forEach((sn) => sn.setContext(context).draw());
+          console.error("Beam error:", e);
+        }
+      }
+    }
+    currentXAbs += measureW;
+  });
+}
+// ==========================================
+// 6. 交互处理
+// ==========================================
+
+function onScoreTap(e) {
+  if (!selected.value) return;
+  const p = getCanvasPoint(e);
+  if (!p) return;
+
+  // 确保有 stave 用于计算坐标
+  if (!scoreStave) redrawScore();
+
+  const naturalKey = yToKey(p.y);
+  const key = applyKeySigToKey(naturalKey, scoreConfig.value.keySig);
+
+  addNoteToMeasures({
+    key,
+    duration: selected.value.duration,
+    dots: selectedDots.value ?? 0,
+    accidental: selectedAccidental.value ?? null,
+    xAbs: p.x,
+  });
+}
+
+function addNoteToMeasures(noteData) {
+  const measureTicks = getMeasureTicks();
+  const ticks = noteToTicks(noteData.duration, noteData.dots);
+
+  let targetIdx = -1;
+  let accX = 10;
+  for (let i = 0; i < measures.value.length; i++) {
+    const w = measures.value[i].width;
+    if (noteData.xAbs >= accX && noteData.xAbs <= accX + w) {
+      targetIdx = i;
+      break;
+    }
+    accX += w;
+  }
+  if (targetIdx === -1) targetIdx = measures.value.length - 1;
+
+  let m = measures.value[targetIdx];
+  if (m.used + ticks > measureTicks) {
+    targetIdx = measures.value.length - 1;
+    m = measures.value[targetIdx];
+    if (m.used + ticks > measureTicks) {
+      measures.value.push({
+        notes: [],
+        used: 0,
+        width: MIN_MEASURE_WIDTH + 20,
+      });
+      targetIdx++;
+      m = measures.value[targetIdx];
+    }
+  }
+
+  const mX = getMeasureX(targetIdx);
+  const offset = getNoteStartOffset(targetIdx);
+  let relX = noteData.xAbs - (mX + offset);
+  if (relX < 0) relX = 0;
+
+  m.notes.push({ ...noteData, ticks, relX, measureIndex: targetIdx });
+  m.used += ticks;
+
+  updateMeasureWidth(targetIdx);
+  redrawScore();
+}
+
+function getCanvasPoint(e) {
+  const t = e.changedTouches?.[0] || e.touches?.[0];
+  let x = e.detail?.x ?? t?.x ?? t?.clientX ?? t?.pageX;
+  let y = e.detail?.y ?? t?.y ?? t?.clientY ?? t?.pageY;
+  if (typeof x !== "number" || typeof y !== "number") return null;
+  return {
+    x: x - canvasLeft + scrollLeftPx,
+    y: y - canvasTop,
+  };
+}
+
+function initScoreCanvas() {
+  const q = uni.createSelectorQuery().in(instance);
+  q.select("#scoreCanvas").fields({ node: true, size: true });
+  q.select("#scoreWrap").boundingClientRect();
+  q.exec((res) => {
+    if (!res?.[0]?.node) return;
+    const info = res[0],
+      wrap = res[1];
+    canvasTop = wrap.top;
+    canvasLeft = wrap.left;
+    scoreNode = info.node;
+    cssW = wrap.width;
+    viewW.value = wrap.width;
+    dpr = uni.getSystemInfoSync().pixelRatio || 1;
+    scoreCtx = scoreNode.getContext("2d");
+    scoreRenderer = new VF.Renderer(scoreNode, VF.Renderer.Backends.CANVAS);
+    redrawScore();
+  });
+}
+
+function onScoreScroll(e) {
+  const sl = e.detail?.scrollLeft ?? 0;
+  if (scrollTimer) return;
+  scrollTimer = setTimeout(() => {
+    scrollLeftPx = sl;
+    redrawScore();
+    scrollTimer = null;
+  }, 16);
+}
+
+// UI 绑定
 function selectDuration(d) {
   selected.value = d;
-}
-function clearAll() {
-  measures.value = [{ notes: [], used: 0 }];
-  redrawScore();
 }
 function selectAccidental(a) {
   selectedAccidental.value = a;
@@ -322,8 +672,12 @@ function selectAccidental(a) {
 function selectDots(k) {
   selectedDots.value = k;
 }
-function setClef(clef) {
-  scoreConfig.value.clef = clef;
+function clearAll() {
+  measures.value = [{ notes: [], used: 0, width: getFirstMeasureMinWidth() }];
+  redrawScore();
+}
+function setClef(v) {
+  scoreConfig.value.clef = v;
   redrawScore();
 }
 function selectTimeSig(v) {
@@ -335,401 +689,8 @@ function selectKeySig(v) {
   redrawScore();
 }
 
-// ===== ticks helpers（你现阶段按 x 放置时用不到 used，但保留）=====
-const TPQ = 480;
-function parseTimeSig(ts) {
-  const [a, b] = String(ts)
-    .split("/")
-    .map((x) => Number(x));
-  return { beats: a || 4, beatValue: b || 4 };
-}
-function durationToQuarters(dur) {
-  const map = { w: 4, h: 2, q: 1, 8: 0.5, 16: 0.25, 32: 0.125, 64: 0.0625 };
-  return map[dur] ?? 1;
-}
-function noteToTicks(duration, dots) {
-  const base = durationToQuarters(duration) * TPQ;
-  const factor = dots ? 1.5 : 1.0;
-  return Math.round(base * factor);
-}
-
-function getMeasureTicks() {
-  const { beats, beatValue } = parseTimeSig(scoreConfig.value.timeSig);
-  const quartersPerBeat = 4 / beatValue; // 一拍等于多少个四分音符
-  return Math.round(beats * quartersPerBeat * TPQ);
-}
-// ✅ 点哪儿放哪儿：只要 measureIndex 存在，就放到指定小节
-function addNoteToMeasures(noteData) {
-  const measureTicks = getMeasureTicks();
-  const ticks = noteToTicks(noteData.duration, noteData.dots);
-
-  // 1) 目标小节 = 最后一个小节（按时间顺序追加）
-  let idx = measures.value.length - 1;
-  let m = measures.value[idx];
-
-  // 2) 放不下 -> 新开小节
-  if (m.used + ticks > measureTicks) {
-    measures.value.push({ notes: [], used: 0 });
-    idx++;
-    m = measures.value[idx];
-  }
-
-  // 3) 计算该小节内的 userX（优先用点击 xAbs，如果不落在该小节，就用“时间进度自动 x”）
-  const marginLeft = 10;
-  const measureW = 200;
-  const gapX = 0;
-
-  const headBlock = idx === 0 ? 60 : 10; // 第一小节避开谱头
-  const left = headBlock;
-  const right = measureW - 10;
-
-  let userX;
-
-  // noteData.xAbs 是“总谱逻辑 x”（已加 scrollLeftPx），用它推算落在哪个小节内
-  if (typeof noteData.xAbs === "number") {
-    const xInMeasure = noteData.xAbs - (marginLeft + idx * (measureW + gapX));
-    // 只有当点击 x 真正在目标小节范围内，才采用它
-    if (xInMeasure >= 0 && xInMeasure <= measureW) {
-      userX = Math.max(left, Math.min(right, xInMeasure));
-    }
-  }
-
-  // 如果点击不在目标小节范围内（或没传 xAbs），就用“按时间进度”给一个稳定的 x
-  if (typeof userX !== "number") {
-    const progress = measureTicks ? m.used / measureTicks : 0; // 0~1
-    userX = left + progress * (right - left);
-    userX = Math.max(left, Math.min(right, userX));
-  }
-
-  // 4) 写入
-  m.notes.push({
-    ...noteData,
-    ticks,
-    userX, // 小节内像素 x（用于你当前的自定义对齐绘制）
-    measureIndex: idx, // 记录归属小节（绘制时用）
-    offsetTicks: m.used,
-  });
-
-  // 5) 更新 used
-  m.used += ticks;
-}
-
-function getKeySigAccidentalMap(keySig) {
-  const info = KEY_SIG_ACC_COUNT[keySig] || KEY_SIG_ACC_COUNT.C;
-  const map = {};
-  if (info.count <= 0) return map;
-  if (info.type === "sharp") {
-    for (let i = 0; i < info.count; i++) map[SHARP_ORDER[i]] = "#";
-  } else {
-    for (let i = 0; i < info.count; i++) map[FLAT_ORDER[i]] = "b";
-  }
-  return map;
-}
-function applyKeySigToKey(naturalKey, keySig) {
-  const accMap = getKeySigAccidentalMap(keySig);
-  const [letterRaw, octaveRaw] = String(naturalKey).split("/");
-  const letter = (letterRaw || "c").toLowerCase();
-  const octave = octaveRaw || "4";
-  const acc = accMap[letter];
-  return acc ? `${letter}${acc}/${octave}` : `${letter}/${octave}`;
-}
-
-function getStemDirectionByKey(key) {
-  const midByClef = { treble: "b/4", bass: "d/3", alto: "c/4", tenor: "a/3" };
-  const mid = midByClef[scoreConfig.value.clef] || "b/4";
-  function toDiatonicIndex(k) {
-    const m = String(k).match(/^([a-g])(bb|##|b|#|n)?\/(\d+)$/i);
-    if (!m) return 0;
-    const letter = m[1].toLowerCase();
-    const octave = Number(m[3]);
-    const order = { c: 0, d: 1, e: 2, f: 3, g: 4, a: 5, b: 6 };
-    return octave * 7 + order[letter];
-  }
-  return toDiatonicIndex(key) >= toDiatonicIndex(mid)
-    ? VF.Stem.DOWN
-    : VF.Stem.UP;
-}
-
-// ===== y -> key =====
-function diatonicStepToKeyFromBase(step, baseKey) {
-  const letters = ["c", "d", "e", "f", "g", "a", "b"];
-  const [baseLetter, baseOct] = String(baseKey).split("/");
-  let idx = letters.indexOf(baseLetter);
-  let oct = Number(baseOct);
-  if (idx < 0 || Number.isNaN(oct)) return "c/4";
-  if (step > 0) {
-    for (let i = 0; i < step; i++) {
-      idx++;
-      if (idx >= 7) {
-        idx = 0;
-        oct++;
-      }
-    }
-  } else if (step < 0) {
-    for (let i = 0; i < -step; i++) {
-      idx--;
-      if (idx < 0) {
-        idx = 6;
-        oct--;
-      }
-    }
-  }
-  return `${letters[idx]}/${oct}`;
-}
-function getBaseKeyForClef(clef) {
-  switch (clef) {
-    case "bass":
-      return "g/2";
-    case "alto":
-      return "f/3";
-    case "tenor":
-      return "d/3";
-    case "treble":
-    default:
-      return "e/4";
-  }
-}
-function yToKey(y) {
-  if (!scoreStave) return "c/4";
-  const spacing = scoreStave.getSpacingBetweenLines();
-  const stepSize = spacing / 2;
-  const bottomLineY = scoreStave.getYForLine(4);
-  let step = Math.round((bottomLineY - y) / stepSize);
-  step = Math.max(-10, Math.min(14, step));
-  const baseKey = getBaseKeyForClef(scoreConfig.value.clef);
-  return diatonicStepToKeyFromBase(step, baseKey);
-}
-
-// ===== x helpers（避免你后续调用报 isXFree 未定义）=====
-function gapForDuration(dur) {
-  const map = { w: 30, h: 24, q: 20, 8: 18, 16: 18, 32: 18, 64: 18 };
-  return map[dur] ?? 28;
-}
-function isXFree(_x) {
-  // 你现在未启用碰撞逻辑，这里先返回 true 兜底
-  return true;
-}
-function placeXAvoidOverlap(xCanvasRaw) {
-  // 你目前没在用它，但保留也不炸
-  return xCanvasRaw;
-}
-
-// 小节可写区（绝对坐标）
-function getMeasureWriteRange(stave, isFirstMeasure) {
-  const left = isFirstMeasure
-    ? (stave.getNoteStartX?.() ?? stave.getX() + 60)
-    : stave.getX() + 10;
-  const right = stave.getX() + stave.getWidth() - 10;
-  return { left, right };
-}
-
-// 总宽（决定 scroll-view 可滚范围）
-function calcTotalScoreWidth() {
-  const marginLeft = 10;
-  const measureW = 200;
-  const gapX = 10;
-  const paddingRight = 20;
-  return marginLeft + measures.value.length * (measureW + gapX) + paddingRight;
-}
-
-function ensureCanvasSize() {
-  if (!scoreNode || !scoreCtx) return;
-
-  // 1) 虚拟总宽（scroll-view 占位）
-  const wantVirtualW = Math.max(viewW.value || 0, calcTotalScoreWidth());
-  if (canvasCssW.value !== wantVirtualW) canvasCssW.value = wantVirtualW;
-
-  // 2) 实际画布宽（只画视口，性能关键）
-  const wCss = viewW.value || cssW || 0;
-  const hCss = canvasCssH.value;
-
-  const targetW = Math.floor(wCss * dpr);
-  const targetH = Math.floor(hCss * dpr);
-
-  if (scoreNode.width !== targetW) scoreNode.width = targetW;
-  if (scoreNode.height !== targetH) scoreNode.height = targetH;
-
-  scoreCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
-}
-
-onReady(() => {
-  initScoreCanvas();
-});
-
-function initScoreCanvas() {
-  const q = uni.createSelectorQuery().in(instance);
-  q.select("#scoreCanvas").fields({ node: true, size: true });
-  q.select("#scoreWrap").boundingClientRect();
-
-  q.exec((res) => {
-    const info = res?.[0];
-    const wrap = res?.[1];
-    if (!info?.node || !wrap) {
-      console.error("找不到 canvas node 或 scoreWrap rect");
-      return;
-    }
-
-    canvasTop = wrap.top;
-    canvasLeft = wrap.left;
-
-    scoreNode = info.node;
-    cssW = wrap.width;
-    viewW.value = wrap.width;
-
-    dpr = uni.getSystemInfoSync().pixelRatio || 1;
-    scoreCtx = scoreNode.getContext("2d");
-
-    canvasCssH.value = 300;
-    canvasCssW.value = Math.max(cssW, calcTotalScoreWidth());
-
-    ensureCanvasSize();
-    scoreRenderer = new VF.Renderer(scoreNode, VF.Renderer.Backends.CANVAS);
-
-    redrawScore();
-  });
-}
-
-function buildStaveNote(n, context, stave) {
-  const dots = n.dots ?? 0;
-  const note = new VF.StaveNote({
-    clef: scoreConfig.value.clef,
-    keys: [n.key],
-    duration: n.duration,
-    stem_direction: getStemDirectionByKey(n.key),
-  });
-
-  note.setContext(context);
-  note.setStave(stave);
-
-  if (n.accidental) note.addModifier(new VF.Accidental(n.accidental), 0);
-  if (dots) VF.Dot.buildAndAttach([note], { all: true });
-
-  return note;
-}
-
-// ✅ 核心：按“用户点击 x”硬对齐（稳定版）
-function redrawScore() {
-  if (!scoreRenderer || !scoreCtx) return;
-
-  ensureCanvasSize();
-  scoreCtx.clearRect(0, 0, viewW.value, canvasCssH.value);
-
-  const context = scoreRenderer.getContext();
-
-  const marginLeft = 10;
-  const top = 30;
-  const measureW = 200;
-  const gapX = 0;
-
-  const viewLeft = -50;
-  const viewRight = viewW.value + 50;
-
-  measures.value.forEach((m, i) => {
-    const x = marginLeft + i * (measureW + gapX) - scrollLeftPx;
-    const y = top;
-
-    if (x + measureW < viewLeft || x > viewRight) return;
-
-    const stave = new VF.Stave(x, y, measureW);
-
-    if (i === 0) {
-      scoreStave = stave;
-      stave.addClef(scoreConfig.value.clef);
-      if (scoreConfig.value.keySig)
-        stave.addKeySignature(scoreConfig.value.keySig);
-      if (scoreConfig.value.timeSig)
-        stave.addTimeSignature(scoreConfig.value.timeSig);
-    }
-
-    if (i === measures.value.length - 1) {
-      stave.setEndBarType(VF.Barline.type.END);
-    } else {
-      stave.setEndBarType(VF.Barline.type.SINGLE);
-    }
-
-    // stave.setEndBarType(VF.Barline.type.SINGLE);
-    stave.setContext(context).draw();
-
-    if (!m.notes?.length) return;
-
-    // 1) 纯显示顺序：按 userX 排序
-    const sortedNotes = [...m.notes].sort(
-      (a, b) => (a.userX ?? 0) - (b.userX ?? 0),
-    );
-
-    // 2) 可写区（绝对坐标）
-    const isFirst = i === 0;
-    const { left, right } = getMeasureWriteRange(stave, isFirst);
-
-    // 3) 每个音符独立 tickContext -> preFormat -> 用 setXShift 对齐到 desiredAbsX
-    sortedNotes.forEach((n) => {
-      const note = buildStaveNote(n, context, stave);
-
-      const tc = new VF.TickContext();
-      tc.addTickable(note);
-      tc.preFormat(); // ✅ 让 note 成为“已格式化”状态
-
-      // 先放到左边一个基准 x（不重要，后面会 shift 对齐）
-      tc.setX(left);
-      note.setTickContext(tc);
-
-      const ux = typeof n.userX === "number" ? n.userX : 0;
-
-      // 你存的是“小节内像素”，变成当前画布的“绝对 x”
-      const desiredAbsX = Math.max(left, Math.min(right, stave.getX() + ux));
-
-      // ✅ 当前真实绝对 x（关键：不要用 tc.getX 代替）
-      const curAbsX = note.getAbsoluteX();
-
-      // 平移到目标点
-      note.setXShift(desiredAbsX - curAbsX);
-
-      note.draw();
-    });
-  });
-}
-
-function getCanvasPoint(e) {
-  const t = e.changedTouches?.[0] || e.touches?.[0];
-  let x = e.detail?.x ?? t?.x ?? t?.clientX ?? t?.pageX;
-  let y = e.detail?.y ?? t?.y ?? t?.clientY ?? t?.pageY;
-  if (typeof x !== "number" || typeof y !== "number") return null;
-
-  // 转成“总谱逻辑坐标”：x 需要 + scrollLeftPx
-  x = x - canvasLeft + scrollLeftPx;
-  y = y - canvasTop;
-
-  x = Math.max(0, Math.min(canvasCssW.value, x));
-  y = Math.max(0, Math.min(canvasCssH.value, y));
-  return { x, y };
-}
-
-function onScoreTap(e) {
-  if (!selected.value) return;
-  if (!scoreStave) redrawScore();
-  if (!scoreStave) return;
-
-  const p = getCanvasPoint(e);
-  if (!p) return;
-
-  const naturalKey = yToKey(p.y);
-  const key = applyKeySigToKey(naturalKey, scoreConfig.value.keySig);
-
-  // ✅ 注意：不再根据点击 x 来决定 measureIndex
-  //     只把“总谱逻辑 xAbs”传进去，让 addNoteToMeasures 在“目标小节”里判断是否采用点击 x
-  addNoteToMeasures({
-    key,
-    duration: selected.value.duration,
-    dots: selectedDots.value ?? 0,
-    accidental: selectedAccidental.value ?? null,
-    xAbs: p.x, // ✅ 传总谱逻辑 x
-  });
-
-  ensureCanvasSize();
-  redrawScore();
-}
+onReady(initScoreCanvas);
 </script>
-
 <style lang="scss" scoped>
 /* 页面背景 */
 .page {
