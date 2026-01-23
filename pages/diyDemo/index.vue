@@ -286,6 +286,22 @@ const KEY_SIG_ACC_COUNT = {
   Cb: { type: "flat", count: 7 },
 };
 
+// 标准音符与附点的 Tick 映射表 (以 TPQ = 480 为基准)
+const TICK_TO_NOTE_MAP = {
+  1920: { duration: "w", dots: 0 },
+  1440: { duration: "h", dots: 1 },
+  960: { duration: "h", dots: 0 },
+  720: { duration: "q", dots: 1 },
+  480: { duration: "q", dots: 0 },
+  360: { duration: "8", dots: 1 },
+  240: { duration: "8", dots: 0 },
+  180: { duration: "16", dots: 1 },
+  120: { duration: "16", dots: 0 },
+  90: { duration: "32", dots: 1 },
+  60: { duration: "32", dots: 0 },
+  30: { duration: "64", dots: 0 },
+};
+
 // ==========================================
 // 2. 响应式状态
 // ==========================================
@@ -442,6 +458,22 @@ function getBeamGroups(timeSig) {
   return [new VF.Fraction(1, 4)]; // 默认
 }
 
+/**
+ * 根据 Tick 寻找最接近的标准音符配置
+ * 如果没有完全匹配的（比如奇怪的切分音），暂取最接近的小于该时值的音符
+ */
+function ticksToNoteData(ticks) {
+  const exact = TICK_TO_NOTE_MAP[ticks];
+  if (exact) return exact;
+
+  // 兜底逻辑：如果截断的 tick 不是标准音符，找最接近的
+  const availableTicks = Object.keys(TICK_TO_NOTE_MAP)
+    .map(Number)
+    .sort((a, b) => b - a);
+  const bestFit = availableTicks.find((t) => t <= ticks) || 480;
+  return TICK_TO_NOTE_MAP[bestFit];
+}
+
 // ==========================================
 // 5. 核心绘图与渲染逻辑
 // ==========================================
@@ -479,6 +511,9 @@ function redrawScore() {
   scoreCtx.clearRect(0, 0, viewW.value, canvasCssH.value);
   const context = scoreRenderer.getContext();
 
+  // 用于跨小节保存上一个需要连线的 VexFlow 音符实例
+  let pendingTieStartNote = null;
+
   let currentXAbs = 10;
   measures.value.forEach((m, i) => {
     updateMeasureWidth(i);
@@ -508,15 +543,13 @@ function redrawScore() {
         const actualStart =
           writingStart > stave.getX() ? writingStart : fallbackStart;
 
-        // 1. 【重要】按坐标对音符数据进行排序，防止连杠交叉
         const sortedNoteData = [...m.notes].sort(
           (a, b) => (a.relX || 0) - (b.relX || 0),
         );
-
         const staveNotes = [];
+
         sortedNoteData.forEach((n) => {
           const note = buildStaveNote(n, context, stave);
-
           const tc = new VF.TickContext().addTickable(note).preFormat();
           tc.setX(0);
           note.setTickContext(tc);
@@ -526,28 +559,41 @@ function redrawScore() {
           note.setXShift(desiredAbsX - currentX);
 
           staveNotes.push(note);
+
+          // --- 延音线 (Tie) 绘制逻辑 ---
+          // 1. 如果这个音符是下半部分，且有上一个音符等待连接
+          if (n.tiedFromPrev && pendingTieStartNote) {
+            note.setContext(context).draw(); // 必须先绘制自身，Tie 才能找对坐标
+
+            // 创建并绘制连线
+            const tie = new VF.StaveTie({
+              first_note: pendingTieStartNote,
+              last_note: note,
+              first_indices: [0], // 单音默认连第 0 个符头
+              last_indices: [0],
+            });
+            tie.setContext(context).draw();
+            pendingTieStartNote = null; // 清空等待队列
+          } else {
+            // 普通音符正常绘制
+            note.setContext(context).draw();
+          }
+
+          // 2. 如果这个音符是上半部分，保存其实例给下一小节用
+          if (n.tiedToNext) {
+            pendingTieStartNote = note;
+          }
         });
 
-        // 2. 生成 Beam
+        // --- Beam 绘制逻辑 (保持不变) ---
         try {
-          // 使用 generateBeams 时，第二个参数非常重要
           const beams = VF.Beam.generateBeams(staveNotes, {
             groups: getBeamGroups(scoreConfig.value.timeSig),
-            // 允许 Beam 自动修改音符的符干方向，以解决图片中“打架”的问题
             maintain_stem_directions: false,
           });
-
-          // 3. 先画音符
-          staveNotes.forEach((sn) => sn.setContext(context).draw());
-
-          // 4. 再画符杠
-          beams.forEach((b) => {
-            b.setContext(context).draw();
-          });
+          beams.forEach((b) => b.setContext(context).draw());
         } catch (e) {
-          // 如果自动生成失败，回退到只画音符
-          staveNotes.forEach((sn) => sn.setContext(context).draw());
-          console.error("Beam error:", e);
+          console.error(e);
         }
       }
     }
@@ -582,6 +628,7 @@ function addNoteToMeasures(noteData) {
   const measureTicks = getMeasureTicks();
   const ticks = noteToTicks(noteData.duration, noteData.dots);
 
+  // 1. 查找点击小节 (逻辑不变)
   let targetIdx = -1;
   let accX = 10;
   for (let i = 0; i < measures.value.length; i++) {
@@ -595,29 +642,74 @@ function addNoteToMeasures(noteData) {
   if (targetIdx === -1) targetIdx = measures.value.length - 1;
 
   let m = measures.value[targetIdx];
-  if (m.used + ticks > measureTicks) {
-    targetIdx = measures.value.length - 1;
-    m = measures.value[targetIdx];
+  const remainingTicks = measureTicks - m.used;
+
+  // 2. 跨小节拆分核心逻辑
+  // 如果当前小节还有空间，但空间不足以放下整个音符
+  if (remainingTicks > 0 && ticks > remainingTicks) {
+    const part1Ticks = remainingTicks;
+    const part2Ticks = ticks - remainingTicks;
+
+    // 获取拆分后的音符配置
+    const part1NoteData = ticksToNoteData(part1Ticks);
+    const part2NoteData = ticksToNoteData(part2Ticks);
+
+    // 计算第一部分的 relX
+    const mX = getMeasureX(targetIdx);
+    const offset = getNoteStartOffset(targetIdx);
+    let relX = Math.max(0, noteData.xAbs - (mX + offset));
+
+    // 放入 Part 1 (当前小节末尾)
+    m.notes.push({
+      ...noteData,
+      duration: part1NoteData.duration,
+      dots: part1NoteData.dots,
+      ticks: part1Ticks,
+      relX: relX,
+      measureIndex: targetIdx,
+      tiedToNext: true, // 标记：连到下一个音符
+    });
+    m.used += part1Ticks;
+    updateMeasureWidth(targetIdx);
+
+    // 准备下一小节
+    targetIdx++;
+    if (targetIdx >= measures.value.length) {
+      measures.value.push({ notes: [], used: 0, width: MIN_MEASURE_WIDTH });
+    }
+    let nextM = measures.value[targetIdx];
+
+    // 放入 Part 2 (下一小节开头)
+    nextM.notes.push({
+      ...noteData,
+      duration: part2NoteData.duration,
+      dots: part2NoteData.dots,
+      ticks: part2Ticks,
+      relX: 0, // 紧贴着小节开头线
+      measureIndex: targetIdx,
+      tiedFromPrev: true, // 标记：从上一个音符连过来
+    });
+    nextM.used += part2Ticks;
+    updateMeasureWidth(targetIdx);
+  } else {
+    // 3. 常规插入逻辑 (完全放下，或小节已满直接全移到下一节)
     if (m.used + ticks > measureTicks) {
-      measures.value.push({
-        notes: [],
-        used: 0,
-        width: MIN_MEASURE_WIDTH + 20,
-      });
       targetIdx++;
+      if (targetIdx >= measures.value.length) {
+        measures.value.push({ notes: [], used: 0, width: MIN_MEASURE_WIDTH });
+      }
       m = measures.value[targetIdx];
     }
+
+    const mX = getMeasureX(targetIdx);
+    const offset = getNoteStartOffset(targetIdx);
+    let relX = Math.max(0, noteData.xAbs - (mX + offset));
+
+    m.notes.push({ ...noteData, ticks, relX, measureIndex: targetIdx });
+    m.used += ticks;
+    updateMeasureWidth(targetIdx);
   }
 
-  const mX = getMeasureX(targetIdx);
-  const offset = getNoteStartOffset(targetIdx);
-  let relX = noteData.xAbs - (mX + offset);
-  if (relX < 0) relX = 0;
-
-  m.notes.push({ ...noteData, ticks, relX, measureIndex: targetIdx });
-  m.used += ticks;
-
-  updateMeasureWidth(targetIdx);
   redrawScore();
 }
 
