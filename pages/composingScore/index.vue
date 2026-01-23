@@ -1,5 +1,5 @@
 <template>
-  <scroll-view scroll-x class="score-scroll-container">
+  <scroll-view scroll-x scroll-y class="score-scroll-container">
     <!-- 绑定 dynamicHeight -->
     <view class="canvas-wrapper" :style="{ width: scoreWidth + 'px', height: dynamicHeight + 'px' }">
       <canvas id="scoreCanvas" canvas-id="scoreCanvas" type="2d" :style="{ width: scoreWidth + 'px', height: dynamicHeight + 'px' }" @touchstart="onCanvasClick" />
@@ -7,15 +7,6 @@
   </scroll-view>
 
   <image v-if="isDragging" class="drag-ghost" :style="ghostStyle" :src="selected.icon" mode="aspectFit" />
-
-  <view class="control-panel">
-    <view class="add-btn" @click="addStave">
-      <text style="font-size: 16px; margin-right: 4px">+</text>
-      新增一行乐谱
-    </view>
-    <view class="info-text">当前选中：第 {{ activeStaveIndex + 1 }} 行</view>
-  </view>
-
   <!-- 音符工具栏 -->
   <view class="note-bar">
     <view
@@ -23,48 +14,57 @@
       :key="d.id"
       class="note-btn"
       :class="{ active: selected?.id === d.id }"
-      @tap="selected = d"
-      @touchstart="(e) => onDragStart(e, d)"
-      @touchmove="onDragMove"
-      @touchend="onDragEnd"
+      @tap.stop="selected = d"
+      @touchstart.stop="(e) => onDragStart(e, d)"
+      @touchmove.stop="onDragMove"
+      @touchend.stop="onDragEnd"
     >
       <!-- <image class="note-icon" v-if="d.icon" :src="d.icon" mode="aspectFit" /> -->
       <view class="note-label">{{ d.label }}</view>
     </view>
   </view>
-
-  <!-- 配置区域：操作的是当前选中的 Stave -->
-  <view class="musicConfig" v-if="activeStaveConfig">
-    <view class="section-title">谱号 (Clef)</view>
-    <view class="clef">
-      <view class="item" :class="{ active: activeStaveConfig.clef === item.value }" @click="updateStaveConfig('clef', item.value)" v-for="item in clefList" :key="item.value">
-        {{ item.label }}
+  <view class="tools">
+    <view class="control-panel">
+      <view class="add-btn" @click="addStave">
+        <text style="font-size: 16px; margin-right: 4px">+</text>
+        新增一行乐谱
       </view>
+      <view class="info-text">当前选中：第 {{ activeStaveIndex + 1 }} 行</view>
     </view>
 
-    <view class="section-title">拍号 (Time Signature)</view>
-    <view class="timeSignatureList">
-      <view
-        class="item"
-        :class="{ active: activeStaveConfig.timeSignature === item.id }"
-        @click="updateStaveConfig('timeSignature', item.id)"
-        v-for="item in timeSignatureList"
-        :key="item.id"
-      >
-        {{ item.id }}
+    <!-- 配置区域：操作的是当前选中的 Stave -->
+    <view class="musicConfig" v-if="activeStaveConfig">
+      <view class="section-title">谱号 (Clef)</view>
+      <view class="clef">
+        <view class="item" :class="{ active: activeStaveConfig.clef === item.value }" @click="updateStaveConfig('clef', item.value)" v-for="item in clefList" :key="item.value">
+          {{ item.label }}
+        </view>
       </view>
-    </view>
 
-    <view class="section-title">调号 (Key Signature)</view>
-    <view class="keySignatureList">
-      <view
-        class="item"
-        :class="{ active: activeStaveConfig.keySignature === item.id }"
-        @click="updateStaveConfig('keySignature', item.id)"
-        v-for="item in keySignatureList"
-        :key="item.id"
-      >
-        {{ item.id }}
+      <view class="section-title">拍号 (Time Signature)</view>
+      <view class="timeSignatureList">
+        <view
+          class="item"
+          :class="{ active: activeStaveConfig.timeSignature === item.id }"
+          @click="updateStaveConfig('timeSignature', item.id)"
+          v-for="item in timeSignatureList"
+          :key="item.id"
+        >
+          {{ item.id }}
+        </view>
+      </view>
+
+      <view class="section-title">调号 (Key Signature)</view>
+      <view class="keySignatureList">
+        <view
+          class="item"
+          :class="{ active: activeStaveConfig.keySignature === item.id }"
+          @click="updateStaveConfig('keySignature', item.id)"
+          v-for="item in keySignatureList"
+          :key="item.id"
+        >
+          {{ item.id }}
+        </view>
       </view>
     </view>
   </view>
@@ -284,7 +284,7 @@ function updateGhost(e) {
   const touch = e.touches ? e.touches[0] : e.changedTouches[0];
   if (touch) {
     dragPoint.value = { x: touch.pageX, y: touch.pageY };
-    ghostStyle.value = `left:${touch.pageX}px;top:${touch.pageY}px;`;
+    ghostStyle.value = `left:${touch.pageX - 20}px;top:${touch.pageY - 40}px;`;
   }
 }
 
@@ -305,12 +305,33 @@ function onDragEnd(e) {
     if (x >= 0 && x <= rect.width && y >= 0 && y <= rect.height) {
       let targetStaveId = null;
       let targetLayout = null;
+
+      // 1. 严格判定：手指落在哪个“蓝色区域”内
       for (let id in layoutMaps) {
         const layout = layoutMaps[id];
-        if (y >= layout.y - 50 && y <= layout.y + layout.height + 50) {
+        // 直接使用 drawScore 里记录的 top 和 bottom
+        if (y >= layout.top && y <= layout.bottom) {
           targetStaveId = parseInt(id);
           targetLayout = layout;
           break;
+        }
+      }
+
+      // 2. 兜底逻辑（可选）：如果正好点在两个区域的缝隙（虽然现在应该没有缝隙），或者点在最下方空白处
+      // 如果你希望点在空白处自动吸附到最后一行，可以保留下面的逻辑，否则可以删除
+      if (!targetStaveId) {
+        // 寻找距离最近的行作为备选（防止拖出边界无效）
+        let minDistance = Infinity;
+        for (let id in layoutMaps) {
+          const layout = layoutMaps[id];
+          const center = layout.top + (layout.bottom - layout.top) / 2;
+          const dist = Math.abs(y - center);
+          if (dist < minDistance && dist < 200) {
+            // 200px 范围内吸附
+            minDistance = dist;
+            targetStaveId = parseInt(id);
+            targetLayout = layout;
+          }
         }
       }
 
@@ -319,8 +340,8 @@ function onDragEnd(e) {
         const staveObj = staveList.value.find((s) => s.id === targetStaveId);
 
         if (staveObj) {
+          // 注意：这里用 targetLayout.y (五线谱线的起始Y) 来创建临时 Stave
           const tempStave = new VF.Stave(0, targetLayout.y, 400);
-          // 修复：确保 Clef 存在，默认为 treble
           tempStave.addClef(staveObj.config.clef || 'treble');
 
           const pitch = calculatePitchFromY(y, tempStave, staveObj.config);
@@ -361,13 +382,28 @@ function insertNoteToStave(staveId, targetX, pitch, duration) {
 
 /**
  * 核心算法：根据 Y 坐标 + 谱号 + 调号，计算出准确的音高
- * 修复：移除对 VexFlow 内部方法的依赖，使用本地字典查表，解决 accidentalList 报错
+ * 修复：【新增限制】限制最大加线数量，防止拖拽到无穷远导致渲染崩溃
  */
 function calculatePitchFromY(y, stave, config) {
   const { clef, keySignature } = config;
 
-  // 1. 获取五线谱 Line
-  const line = stave.getLineForY(y);
+  // 1. 获取五线谱 Line (原始值)
+  let line = stave.getLineForY(y);
+
+  // ======================================================
+  // 【新增限制】: 限制加线数量 (Clamping)
+  // ======================================================
+  const MAX_LEDGER_LINES = 5; // 允许最大加线数 (5条)
+
+  // 顶线是 0，往上是负数。限制为 -5
+  const TOP_LIMIT = 0 - MAX_LEDGER_LINES;
+  // 底线是 4，往下是正数。限制为 4 + 5 = 9
+  const BOTTOM_LIMIT = 4 + MAX_LEDGER_LINES;
+
+  // 强制修正 line 的范围
+  if (line < TOP_LIMIT) line = TOP_LIMIT;
+  if (line > BOTTOM_LIMIT) line = BOTTOM_LIMIT;
+  // ======================================================
 
   // 2. 确定基准音
   let bottomLineNote = { step: 'E', octave: 4 }; // Treble
@@ -377,6 +413,8 @@ function calculatePitchFromY(y, stave, config) {
 
   const noteNames = ['C', 'D', 'E', 'F', 'G', 'A', 'B'];
   const bottomLineIndex = bottomLineNote.octave * 7 + noteNames.indexOf(bottomLineNote.step);
+
+  // 使用限制后的 line 计算步数
   const visualSteps = Math.round((4 - line) * 2);
   const targetIndex = bottomLineIndex + visualSteps;
 
@@ -385,13 +423,9 @@ function calculatePitchFromY(y, stave, config) {
   const safeStepIndex = stepIndex < 0 ? 7 + stepIndex : stepIndex;
   const noteName = noteNames[safeStepIndex];
 
-  // 3. 【修复】使用本地字典判断调号影响，不再调用 VexFlow 实例方法
-
-  // 定义哪些调是升号调，哪些是降号调，以及受影响的音名列表
+  // 3. 调号处理
   const KEY_DATA = {
     C: { type: '', notes: [] },
-
-    // 升号调 (#)
     G: { type: '#', notes: ['F'] },
     D: { type: '#', notes: ['F', 'C'] },
     A: { type: '#', notes: ['F', 'C', 'G'] },
@@ -399,8 +433,6 @@ function calculatePitchFromY(y, stave, config) {
     B: { type: '#', notes: ['F', 'C', 'G', 'D', 'A'] },
     'F#': { type: '#', notes: ['F', 'C', 'G', 'D', 'A', 'E'] },
     'C#': { type: '#', notes: ['F', 'C', 'G', 'D', 'A', 'E', 'B'] },
-
-    // 降号调 (b)
     F: { type: 'b', notes: ['B'] },
     Bb: { type: 'b', notes: ['B', 'E'] },
     Eb: { type: 'b', notes: ['B', 'E', 'A'] },
@@ -413,7 +445,6 @@ function calculatePitchFromY(y, stave, config) {
   const currentKeyData = KEY_DATA[keySignature] || KEY_DATA['C'];
   let acc = '';
 
-  // 如果当前音名在受影响的列表里，自动加升降号
   if (currentKeyData.notes.includes(noteName)) {
     acc = currentKeyData.type;
   }
@@ -554,28 +585,29 @@ function drawScore() {
   visualMaps = {};
   layoutMaps = {};
 
-  let currentStaveY = 50;
-  let maxRequiredWidth = 0;
+  const windowInfo = uni.getWindowInfo();
+  const screenWidth = windowInfo.windowWidth;
+
   const renderDataList = [];
 
   staveList.value.forEach((staveObj) => {
-    const measures = processNotesToMeasures(
-      staveObj.notes,
-      staveObj.config.timeSignature,
-      staveObj.config.clef // <--- 传入谱号
-    );
+    // 传入配置的拍号
+    const measures = processNotesToMeasures(staveObj.notes, staveObj.config.timeSignature, staveObj.config.clef);
+
     const calculatedWidths = [];
     let rowWidth = 10;
     let rowMinY = 0;
     let rowMaxY = 80;
 
     measures.forEach((measure, index) => {
+      // 1. Modifier (谱号/调号) 宽度计算
       const dummyStave = new VF.Stave(0, 0, 500);
       if (index === 0) {
         dummyStave.addClef(staveObj.config.clef).addKeySignature(staveObj.config.keySignature).addTimeSignature(staveObj.config.timeSignature);
       }
       const modifierWidth = dummyStave.getNoteStartX();
 
+      // 2. 音符内容宽度计算
       let minNoteWidth = 0;
       let voice = null;
 
@@ -584,14 +616,18 @@ function drawScore() {
         voice.setStrict(false);
         voice.addTickables(measure.notes);
 
-        // 自动升降号 (Safety Check)
+        // 自动升降号
         if (VF.Accidental) {
           VF.Accidental.applyAccidentals([voice], staveObj.config.keySignature);
         }
 
         const formatter = new VF.Formatter().joinVoices([voice]);
+
+        // 算出极限最小宽度
         formatter.preCalculateMinTotalWidth([voice]);
         minNoteWidth = formatter.getMinTotalWidth();
+
+        // 用于计算高度 (BoundingBox)
         formatter.format([voice], 500);
 
         measure.notes.forEach((note) => {
@@ -603,24 +639,37 @@ function drawScore() {
           }
         });
       } else {
-        minNoteWidth = 40;
+        minNoteWidth = 40; // 空小节默认宽
       }
 
-      let contentWidth = minNoteWidth + 30;
+      // =======================================================
+      // 【核心优化】: 比例系数 + 小额补偿
+      // =======================================================
+
+      // 1. 弹性宽度：极限宽度 * 1.25
+      // 之前的 +50 太大了，现在改成乘法，音符少时增加的宽度就少，音符多时增加的多
+      let contentWidth = minNoteWidth * 1.25;
+
+      // 2. 额外补偿：每个小节只给 15px 的固定呼吸空间 (之前是50px)
+      contentWidth += 15;
+
+      // 3. 最小保底：60px (防止单音符小节太窄)
       contentWidth = Math.max(contentWidth, 60);
-      let extraRightPadding = index === measures.length - 1 ? 80 : 10;
+
+      // 4. 右侧留白 (Padding)
+      let extraRightPadding = index === measures.length - 1 ? 80 : 20; // 中间小节不给额外 padding，让小节线紧凑点
+
       let measureWidth = modifierWidth + contentWidth + extraRightPadding;
 
       calculatedWidths.push({
         measureWidth,
-        formatWidth: contentWidth,
+        formatWidth: contentWidth, // 告诉 Formatter 用这个宽度去排版
         voice
       });
       rowWidth += measureWidth;
     });
 
-    if (rowWidth > maxRequiredWidth) maxRequiredWidth = rowWidth;
-
+    // 计算每行的布局高度
     const topPadding = 30;
     let offsetY = 0;
     if (rowMinY < 0) offsetY = Math.abs(rowMinY) + topPadding;
@@ -631,15 +680,25 @@ function drawScore() {
       measures,
       calculatedWidths,
       offsetY,
-      actualHeight
+      actualHeight,
+      rowWidth
     });
   });
 
-  const finalScoreWidth = Math.max(maxRequiredWidth + 50, 350);
-  let totalCanvasHeight = 50;
+  // --- 计算最大宽度 ---
+  let maxRequiredWidth = 0;
+  renderDataList.forEach((d) => {
+    if (d.rowWidth > maxRequiredWidth) maxRequiredWidth = d.rowWidth;
+  });
+
+  // 宽度计算加入 screenWidth 保底
+  const finalScoreWidth = Math.max(maxRequiredWidth + 50, screenWidth);
+
+  let totalCanvasHeight = 20;
   renderDataList.forEach((d) => (totalCanvasHeight += d.actualHeight));
   totalCanvasHeight = Math.max(totalCanvasHeight, 300);
 
+  // Resize Check
   if (Math.abs(scoreWidth.value - finalScoreWidth) > 5 || Math.abs(canvasNode.height / (uni.getWindowInfo().pixelRatio || 2) - totalCanvasHeight) > 5) {
     scoreWidth.value = finalScoreWidth;
     dynamicHeight.value = totalCanvasHeight;
@@ -651,12 +710,14 @@ function drawScore() {
   }
 
   ctx.clear();
-  let cursorY = 50;
+  let cursorY = 20;
 
   renderDataList.forEach((data) => {
     const { staveObj, measures, calculatedWidths, offsetY, actualHeight } = data;
     const staveY = cursorY + offsetY;
-    layoutMaps[staveObj.id] = { y: staveY, height: actualHeight };
+
+    // 记录区域
+    layoutMaps[staveObj.id] = { top: cursorY, bottom: cursorY + actualHeight, y: staveY };
     visualMaps[staveObj.id] = [];
 
     // 选中高亮
@@ -687,9 +748,13 @@ function drawScore() {
 
       const voice = layoutInfo.voice;
       if (voice) {
+        // 使用带有“富裕空间”的宽度进行排版
         const availableWidth = layoutInfo.formatWidth;
         const formatter = new VF.Formatter().joinVoices([voice]);
+
+        // 【关键】VexFlow 会把 extra space 均匀撒在音符之间
         formatter.format([voice], availableWidth);
+
         voice.draw(ctx, stave);
 
         measure.notes.forEach((note) => {
@@ -756,6 +821,7 @@ function drawScore() {
 }
 .score-scroll-container {
   width: 100%;
+  height: 50vh;
   white-space: nowrap;
   background: #fff;
   border-bottom: 1px solid #eee;
@@ -821,5 +887,9 @@ function drawScore() {
       }
     }
   }
+}
+.tools {
+  height: 30vh;
+  overflow-y: auto;
 }
 </style>
