@@ -1,5 +1,13 @@
 {
-  "pages": [{
+  "pages": [
+    {
+      "path": "pages/diyDemo/index",
+      "style": {
+        "navigationBarTitleText": "自定义",
+        "navigationStyle": "custom"
+      }
+    },
+    {
       "path": "pages/composingScore/index",
       "style": {
         "navigationBarTitleText": "渲染"
@@ -12,26 +20,20 @@
         "navigationBarTitleText": "渲染",
         "navigationStyle": "custom"
       }
-    },
-    {
-      "path": "pages/diyDemo/index",
-      "style": {
-        "navigationBarTitleText": "自定义",
-        "navigationStyle": "custom"
-      }
     }
   ],
   "tabBar": {
     "color": "#999",
     "selectedColor": "#2979ff",
-    "list": [{
+    "list": [
+      {
         "pagePath": "pages/demo2/index",
         "text": "渲染"
       },
       {
         "pagePath": "pages/diyDemo/index",
         "text": "自定义"
-      },  
+      },
       {
         "pagePath": "pages/composingScore/index",
         "text": "渲染2"

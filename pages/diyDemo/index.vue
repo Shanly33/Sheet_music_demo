@@ -1,131 +1,151 @@
 <template>
   <view class="page">
-    <!-- 主五线谱：scroll-view 只做滚动条，canvas 叠在上面固定显示 -->
-    <view class="score-wrap" id="scoreWrap">
-      <canvas
-        id="scoreCanvas"
-        canvas-id="scoreCanvas"
-        type="2d"
-        class="score-canvas"
-        :style="{
-          width: viewW ? viewW + 'px' : '100%',
-          height: canvasCssH + 'px',
-        }"
-      />
-
-      <scroll-view
-        class="score-scroll"
-        scroll-x
-        enhanced
-        enable-passive
-        :show-scrollbar="false"
-        :bounces="false"
-        @scroll="onScoreScroll"
-        @tap="onScoreTap"
-      >
-        <!-- 占位：撑出可滚动宽度（决定能不能滚） -->
-        <view
-          :style="{ width: canvasCssW + 'px', height: canvasCssH + 'px' }"
+    <!-- 顶部：五线谱主区域 -->
+    <view class="score-container">
+      <view class="score-wrap" id="scoreWrap">
+        <!-- 实际绘图 Canvas -->
+        <canvas
+          id="scoreCanvas"
+          canvas-id="scoreCanvas"
+          type="2d"
+          class="score-canvas"
+          :style="{
+            width: viewW ? viewW + 'px' : '100%',
+            height: canvasCssH + 'px',
+          }"
         />
-      </scroll-view>
+
+        <!-- 滚动交互层 -->
+        <scroll-view
+          class="score-scroll"
+          scroll-x
+          enhanced
+          enable-passive
+          :show-scrollbar="true"
+          :bounces="false"
+          @scroll="onScoreScroll"
+          @tap="onScoreTap"
+        >
+          <!-- 撑开宽度的占位元素 -->
+          <view
+            :style="{ width: canvasCssW + 'px', height: canvasCssH + 'px' }"
+          ></view>
+        </scroll-view>
+      </view>
     </view>
 
-    <view class="opt-bar">
-      <view class="opt-title">谱号</view>
-      <view class="opt-row">
-        <view
-          v-for="k in clefOptions"
-          :key="k.value"
-          class="opt-btn"
-          :class="{ active: scoreConfig.clef === k.value }"
-          @tap="setClef(k.value)"
-        >
-          {{ k.label }}
+    <!-- 底部：操作控制面板 -->
+    <view class="controls-area">
+      <!-- 1. 基础配置 (谱号 / 调号 / 拍号) -->
+      <view class="panel-section">
+        <view class="panel-header">乐谱设置</view>
+        <scroll-view scroll-x class="h-scroll">
+          <view class="opt-group">
+            <!-- 谱号 -->
+            <view class="opt-column">
+              <text class="sub-label">谱号</text>
+              <view class="opt-row">
+                <view
+                  v-for="k in clefOptions"
+                  :key="k.value"
+                  class="opt-chip"
+                  :class="{ active: scoreConfig.clef === k.value }"
+                  @tap="setClef(k.value)"
+                >
+                  {{ k.label }}
+                </view>
+              </view>
+            </view>
+            <!-- 拍号 -->
+            <view class="opt-column">
+              <text class="sub-label">拍号</text>
+              <view class="opt-row">
+                <view
+                  v-for="t in timeSigOptions"
+                  :key="t.value"
+                  class="opt-chip"
+                  :class="{ active: scoreConfig.timeSig === t.value }"
+                  @tap="selectTimeSig(t.value)"
+                >
+                  {{ t.label }}
+                </view>
+              </view>
+            </view>
+            <!-- 调号 -->
+            <view class="opt-column">
+              <text class="sub-label">调号</text>
+              <view class="opt-row">
+                <view
+                  v-for="k in keySigOptions"
+                  :key="k.value"
+                  class="opt-chip"
+                  :class="{ active: scoreConfig.keySig === k.value }"
+                  @tap="selectKeySig(k.value)"
+                >
+                  {{ k.label }}
+                </view>
+              </view>
+            </view>
+          </view>
+        </scroll-view>
+      </view>
+
+      <!-- 2. 音符输入工具栏 -->
+      <view class="panel-section">
+        <view class="panel-header">音符与记号</view>
+
+        <!-- 音符时值 -->
+        <scroll-view scroll-x class="h-scroll">
+          <view class="note-list">
+            <view
+              v-for="d in durations"
+              :key="d.id"
+              class="note-card"
+              :class="{ active: selected?.id === d.id }"
+              @tap="selectDuration(d)"
+            >
+              <image class="note-icon" :src="d.icon" mode="aspectFit" />
+              <text class="note-name">{{ d.label }}</text>
+            </view>
+          </view>
+        </scroll-view>
+
+        <!-- 临时记号 & 附点 & 功能 -->
+        <view class="tools-row">
+          <!-- 临时记号 -->
+          <view class="tool-group">
+            <view
+              v-for="a in accidentals"
+              :key="a.id"
+              class="mini-btn"
+              :class="{ active: selectedAccidental === a.value }"
+              @tap="selectAccidental(a.value)"
+            >
+              {{ a.label }}
+            </view>
+          </view>
+
+          <!-- 附点 -->
+          <view class="tool-group">
+            <view
+              class="mini-btn"
+              :class="{ active: selectedDots === 0 }"
+              @tap="selectDots(0)"
+              >无附点</view
+            >
+            <view
+              class="mini-btn"
+              :class="{ active: selectedDots === 1 }"
+              @tap="selectDots(1)"
+              >附点(.)</view
+            >
+          </view>
+
+          <!-- 清空 -->
+          <view class="tool-group right">
+            <view class="mini-btn danger" @tap="clearAll">清空谱面</view>
+          </view>
         </view>
-      </view>
-    </view>
-
-    <!-- 调号 -->
-    <view class="opt-bar">
-      <view class="opt-title">调号</view>
-      <view class="opt-row">
-        <view
-          v-for="k in keySigOptions"
-          :key="k.value"
-          class="opt-btn"
-          :class="{ active: scoreConfig.keySig === k.value }"
-          @tap="selectKeySig(k.value)"
-        >
-          {{ k.label }}
-        </view>
-      </view>
-    </view>
-
-    <!-- 拍号 -->
-    <view class="opt-bar">
-      <view class="opt-title">拍号</view>
-      <view class="opt-row">
-        <view
-          v-for="t in timeSigOptions"
-          :key="t.value"
-          class="opt-btn"
-          :class="{ active: scoreConfig.timeSig === t.value }"
-          @tap="selectTimeSig(t.value)"
-        >
-          {{ t.label }}
-        </view>
-      </view>
-    </view>
-
-    <!-- 底部：音符时值选择 -->
-    <view class="note-bar">
-      <view
-        v-for="d in durations"
-        :key="d.id"
-        class="note-btn"
-        :class="{ active: selected?.id === d.id }"
-        @tap="selectDuration(d)"
-      >
-        <image class="note-icon" :src="d.icon" mode="aspectFit" />
-      </view>
-
-      <view class="note-btn danger" @tap="clearAll">
-        <view class="danger-text">清空</view>
-      </view>
-    </view>
-
-    <!-- 临时记号选择 -->
-    <view class="opt-bar">
-      <view class="opt-title">临时记号</view>
-      <view class="opt-row">
-        <view
-          v-for="a in accidentals"
-          :key="a.id"
-          class="opt-btn"
-          :class="{ active: selectedAccidental === a.value }"
-          @tap="selectAccidental(a.value)"
-        >
-          {{ a.label }}
-        </view>
-      </view>
-    </view>
-
-    <!-- 附点选择 -->
-    <view class="opt-bar">
-      <view class="opt-title">附点</view>
-      <view class="opt-row">
-        <view
-          class="opt-btn"
-          :class="{ active: selectedDots === 0 }"
-          @tap="selectDots(0)"
-          >0</view
-        >
-        <view
-          class="opt-btn"
-          :class="{ active: selectedDots === 1 }"
-          @tap="selectDots(1)"
-          >1</view
-        >
       </view>
     </view>
   </view>
@@ -621,7 +641,13 @@ function redrawScore() {
         stave.addTimeSignature(scoreConfig.value.timeSig);
     }
 
-    stave.setEndBarType(VF.Barline.type.SINGLE);
+    if (i === measures.value.length - 1) {
+      stave.setEndBarType(VF.Barline.type.END);
+    } else {
+      stave.setEndBarType(VF.Barline.type.SINGLE);
+    }
+
+    // stave.setEndBarType(VF.Barline.type.SINGLE);
     stave.setContext(context).draw();
 
     if (!m.notes?.length) return;
@@ -704,9 +730,22 @@ function onScoreTap(e) {
 }
 </script>
 
-<style scoped>
+<style lang="scss" scoped>
+/* 页面背景 */
 .page {
+  min-height: 100vh;
+  background-color: #f5f7fa;
   padding: 16px;
+  box-sizing: border-box;
+}
+
+/* 顶部乐谱区域 */
+.score-container {
+  background: #fff;
+  border-radius: 12px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
+  overflow: hidden;
+  margin-bottom: 20px;
 }
 
 .score-wrap {
@@ -720,9 +759,6 @@ function onScoreTap(e) {
   left: 0;
   top: 0;
   z-index: 1;
-  border: 1px solid #333;
-  border-radius: 10px;
-  background: #fff;
 }
 
 .score-scroll {
@@ -735,69 +771,159 @@ function onScoreTap(e) {
   background: transparent;
 }
 
-.note-bar {
-  margin-top: 12px;
-  display: flex;
-  gap: 10px;
-  flex-wrap: wrap;
-  align-items: flex-start;
-}
-
-.note-btn {
-  padding: 8px;
-  border: 1px solid #999;
-  border-radius: 12px;
-  background: #fff;
+/* 控制区域整体布局 */
+.controls-area {
   display: flex;
   flex-direction: column;
-  align-items: center;
-}
-.note-btn.active {
-  border-color: #1677ff;
+  gap: 16px;
 }
 
-.note-icon {
-  width: 30px;
-  height: 30px;
-}
-
-.note-btn.danger {
-  width: 92px;
-  justify-content: center;
-  border-color: #ff4d4f;
-}
-
-.danger-text {
-  font-size: 14px;
-  color: #ff4d4f;
-}
-
-.opt-bar {
-  margin-top: 10px;
-  padding: 10px 8px;
-  border: 1px solid #eee;
-  border-radius: 12px;
+/* 通用板块样式 */
+.panel-section {
   background: #fff;
+  border-radius: 12px;
+  padding: 12px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.03);
+
+  .panel-header {
+    font-size: 14px;
+    font-weight: 600;
+    color: #333;
+    margin-bottom: 10px;
+    padding-left: 4px;
+    border-left: 3px solid #1677ff;
+  }
 }
-.opt-title {
-  font-size: 12px;
-  color: #666;
-  margin-bottom: 8px;
+
+/* 横向滚动容器 */
+.h-scroll {
+  width: 100%;
+  white-space: nowrap;
 }
+
+/* 选项组布局 */
+.opt-group {
+  display: flex;
+  gap: 16px;
+  padding-bottom: 4px; /* 防止滚动条遮挡 */
+}
+
+.opt-column {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+
+  .sub-label {
+    font-size: 12px;
+    color: #999;
+  }
+}
+
 .opt-row {
   display: flex;
   gap: 8px;
-  flex-wrap: wrap;
 }
-.opt-btn {
-  min-width: 44px;
-  padding: 6px 10px;
-  border: 1px solid #999;
+
+/* 小胶囊按钮 */
+.opt-chip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 4px 12px;
+  background: #f0f2f5;
+  border: 1px solid transparent;
+  border-radius: 16px;
+  font-size: 13px;
+  color: #666;
+  transition: all 0.2s;
+
+  &.active {
+    background: #e6f7ff;
+    border-color: #1677ff;
+    color: #1677ff;
+    font-weight: 500;
+  }
+}
+
+/* 音符选择列表 */
+.note-list {
+  display: flex;
+  gap: 12px;
+  padding: 4px 2px;
+}
+
+.note-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  width: 64px;
+  height: 64px;
+  background: #fff;
+  border: 1px solid #eee;
   border-radius: 10px;
-  text-align: center;
-  font-size: 14px;
+  flex-shrink: 0;
+  transition: all 0.2s;
+
+  &.active {
+    border-color: #1677ff;
+    background: #e6f7ff;
+    box-shadow: 0 2px 8px rgba(22, 119, 255, 0.15);
+  }
+
+  .note-icon {
+    width: 28px;
+    height: 28px;
+    margin-bottom: 4px;
+  }
+
+  .note-name {
+    font-size: 11px;
+    color: #666;
+  }
 }
-.opt-btn.active {
-  border-color: #1677ff;
+
+/* 工具行 (记号、附点、按钮) */
+.tools-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 16px;
+  align-items: center;
+}
+
+.tool-group {
+  display: flex;
+  gap: 8px;
+
+  &.right {
+    margin-left: auto; /* 推到最右边 */
+  }
+}
+
+/* 迷你功能按钮 */
+.mini-btn {
+  padding: 6px 12px;
+  border: 1px solid #ddd;
+  border-radius: 6px;
+  font-size: 13px;
+  color: #555;
+  background: #fff;
+  min-width: 24px;
+  text-align: center;
+
+  &.active {
+    border-color: #1677ff;
+    background: #1677ff;
+    color: #fff;
+  }
+
+  &.danger {
+    border-color: #ff4d4f;
+    color: #ff4d4f;
+    &:active {
+      background: #fff1f0;
+    }
+  }
 }
 </style>
