@@ -569,9 +569,47 @@ function processNotesToMeasures(rawNotes, timeSignature = '4/4', clef = 'treble'
   if (currentMeasure.notes.length > 0 || measures.length === 0) {
     measures.push(currentMeasure);
   }
+ // 定义哪些时值的音符支持符尾连线 (通常是 8分及更短)
+  const beamableDurations = ['8', '16', '32', '64'];
+
   measures.forEach((m) => {
-    const notesToBeam = m.notes.filter((n) => !n.duration.includes('r'));
-    if (notesToBeam.length > 0) m.beams = VF.Beam.generateBeams(notesToBeam);
+    m.beams = [];
+    let noteGroup = []; // 当前正在收集的连续可连线音符组
+
+    m.notes.forEach((note) => {
+      // 1. 获取音符的纯时值字符串（去掉 'r' 等修饰，例如 '8r' -> '8'）
+      // 注意：VexFlow note.duration 可能是 '8', 'q', 'h', '8r' 等
+      const durationKey = note.duration.replace('r', '');
+      
+      // 2. 判断是否为休止符
+      const isRest = note.duration.includes('r');
+
+      // 3. 判断是否可连线：必须在列表中，且不能是休止符（通常休止符打断连线）
+      const isBeamable = beamableDurations.includes(durationKey) && !isRest;
+
+      if (isBeamable) {
+        // 如果是可连线音符，加入当前组
+        noteGroup.push(note);
+      } else {
+        // --- 遇到不可连线音符（4分、2分、休止符），结算上一组 ---
+        if (noteGroup.length > 1) {
+          // 使用 generateBeams 自动处理组内的节拍划分（比如4个16分音符会自动分组）
+          const beams = VF.Beam.generateBeams(noteGroup, {
+            beam_rests: false,
+            beam_middle_only: false
+          });
+          m.beams.push(...beams);
+        }
+        // 清空组，重新开始
+        noteGroup = [];
+      }
+    });
+
+    // --- 循环结束后，处理最后可能残留的一组 ---
+    if (noteGroup.length > 1) {
+      const beams = VF.Beam.generateBeams(noteGroup);
+      m.beams.push(...beams);
+    }
   });
   return measures;
 }
@@ -591,6 +629,11 @@ function drawScore() {
   const renderDataList = [];
 
   staveList.value.forEach((staveObj) => {
+     // 1. 获取当前行的拍号配置（用于创建正确的 Voice）
+    const timeSigStr = staveObj.config.timeSignature || '4/4';
+    const [numStr, denStr] = timeSigStr.split('/');
+    const numBeats = parseInt(numStr) || 4;
+    const beatValue = parseInt(denStr) || 4;
     // 传入配置的拍号
     const measures = processNotesToMeasures(staveObj.notes, staveObj.config.timeSignature, staveObj.config.clef);
 
@@ -608,11 +651,11 @@ function drawScore() {
       const modifierWidth = dummyStave.getNoteStartX();
 
       // 2. 音符内容宽度计算
-      let minNoteWidth = 0;
+      let measureContentWidth = 0; // 纯音符内容的宽度
       let voice = null;
 
       if (measure.notes.length > 0) {
-        voice = new VF.Voice({ num_beats: 4, beat_value: 4 });
+        voice = new VF.Voice({ num_beats: numBeats, beat_value: beatValue })
         voice.setStrict(false);
         voice.addTickables(measure.notes);
 
@@ -622,14 +665,12 @@ function drawScore() {
         }
 
         const formatter = new VF.Formatter().joinVoices([voice]);
-
-        // 算出极限最小宽度
+        // 这会让 VexFlow 计算出音符紧凑排列所需的“绝对最小宽度”
         formatter.preCalculateMinTotalWidth([voice]);
-        minNoteWidth = formatter.getMinTotalWidth();
+        measureContentWidth = formatter.getMinTotalWidth();
 
-        // 用于计算高度 (BoundingBox)
-        formatter.format([voice], 500);
-
+        // 计算高度包围盒
+        formatter.format([voice], 0); // 0 表示只计算不强制拉伸
         measure.notes.forEach((note) => {
           note.setStave(dummyStave);
           const box = note.getBoundingBox();
@@ -639,7 +680,7 @@ function drawScore() {
           }
         });
       } else {
-        minNoteWidth = 40; // 空小节默认宽
+        measureContentWidth  = 40; // 空小节默认宽
       }
 
       // =======================================================
@@ -647,23 +688,16 @@ function drawScore() {
       // =======================================================
 
       // 1. 弹性宽度：极限宽度 * 1.25
-      // 之前的 +50 太大了，现在改成乘法，音符少时增加的宽度就少，音符多时增加的多
-      let contentWidth = minNoteWidth * 1.25;
-
-      // 2. 额外补偿：每个小节只给 15px 的固定呼吸空间 (之前是50px)
-      contentWidth += 15;
-
-      // 3. 最小保底：60px (防止单音符小节太窄)
-      contentWidth = Math.max(contentWidth, 60);
+      let finalContentWidth = Math.max(measureContentWidth + 20, 60);
 
       // 4. 右侧留白 (Padding)
-      let extraRightPadding = index === measures.length - 1 ? 80 : 20; // 中间小节不给额外 padding，让小节线紧凑点
+      let extraRightPadding = index === measures.length - 1 ? 50 : 20;// 中间小节不给额外 padding，让小节线紧凑点
 
-      let measureWidth = modifierWidth + contentWidth + extraRightPadding;
+      let measureWidth = modifierWidth + finalContentWidth + extraRightPadding;
 
       calculatedWidths.push({
         measureWidth,
-        formatWidth: contentWidth, // 告诉 Formatter 用这个宽度去排版
+        formatWidth: finalContentWidth, // 告诉 Formatter 用这个宽度去排版
         voice
       });
       rowWidth += measureWidth;
