@@ -82,7 +82,7 @@ const ghostStyle = ref('');
 const scoreWidth = ref(400);
 let canvasNode = null;
 let globalCtx = null;
-
+const selectedNoteId = ref(null);//音符选中
 // 画布高度动态计算
 const dynamicHeight = ref(300);
 
@@ -252,22 +252,63 @@ function initCanvas() {
 // ============================================================
 
 function onCanvasClick(e) {
-  // 增加触摸点检测的安全性
   const touch = e.touches && e.touches[0];
   if (!touch) return;
 
   const rectQuery = uni.createSelectorQuery().in(instance.proxy).select('#scoreCanvas').boundingClientRect();
   rectQuery.exec((res) => {
     if (!res[0]) return;
-    const y = touch.pageY - res[0].top;
+    // 获取相对于 Canvas 内部的坐标
+    const clickX = touch.pageX - res[0].left;
+    const clickY = touch.pageY - res[0].top;
 
-    for (let id in layoutMaps) {
-      const layout = layoutMaps[id];
-      if (y >= layout.y - 40 && y <= layout.y + layout.height + 40) {
-        activeStaveId.value = parseInt(id);
-        break;
+    let foundStave = false;
+    let foundNote = false;
+
+    // 1. 遍历所有行，查找是否点中了某个音符
+    for (let staveIdStr in visualMaps) {
+      const notesVisuals = visualMaps[staveIdStr];
+      
+      // 遍历该行所有可见音符
+      for (let i = 0; i < notesVisuals.length; i++) {
+        const visual = notesVisuals[i];
+        if (visual.bbox) {
+          // 增加一点点击容错范围 (padding 5px)
+          const padding = 10;
+          const bx = visual.bbox.x - padding;
+          const by = visual.bbox.y - padding;
+          const bw = visual.bbox.w + padding * 2;
+          const bh = visual.bbox.h + padding * 2;
+
+          // 碰撞检测
+          if (clickX >= bx && clickX <= bx + bw && clickY >= by && clickY <= by + bh) {
+            selectedNoteId.value = visual.id; // 选中音符
+            activeStaveId.value = parseInt(staveIdStr); // 同时激活所在的行
+            foundNote = true;
+            break;
+          }
+        }
+      }
+      if (foundNote) break;
+    }
+
+    // 2. 如果没有点中音符，判断是否点中了行（原有逻辑）
+    if (!foundNote) {
+      // 点击空白处，取消音符选中
+      selectedNoteId.value = null;
+
+      for (let id in layoutMaps) {
+        const layout = layoutMaps[id];
+        // 扩大一点判定范围
+        if (clickY >= layout.y - 40 && clickY <= layout.y + layout.height + 40) {
+          activeStaveId.value = parseInt(id);
+          foundStave = true;
+          break;
+        }
       }
     }
+
+    // 重绘以更新高亮状态
     drawScore();
   });
 }
@@ -498,6 +539,7 @@ function processNotesToMeasures(rawNotes, timeSignature = '4/4', clef = 'treble'
     rawDuration: n.duration,
     totalTicks: durationTicks[n.duration] || durationTicks['q'],
     rawIndex: index,
+    id: n.id, // <--- 关键：音符高亮保留原始ID
     isRest: n.duration.indexOf('r') !== -1
   }));
 
@@ -530,12 +572,17 @@ function processNotesToMeasures(rawNotes, timeSignature = '4/4', clef = 'treble'
         vfDuration = baseDuration + 'r';
       }
 
-      return new VF.StaveNote({
+     const vfNote = new VF.StaveNote({
         keys: vfKeys,
         duration: vfDuration,
         auto_stem: !originalItem.isRest,
-        clef: clef // 【关键修改】：告诉音符当前的谱号
+        clef: clef 
       });
+
+      // 音符高亮，将原始音符ID挂载到 VexFlow 对象上
+      vfNote.sourceNoteId = originalItem.id; 
+      
+      return vfNote;
     };
 
     if (item.totalTicks <= ticksSpace + 10) {
@@ -559,6 +606,7 @@ function processNotesToMeasures(rawNotes, timeSignature = '4/4', clef = 'treble'
         totalTicks: remainTicks,
         isLinkedToPrevious: true,
         rawIndex: item.rawIndex,
+        id: item.id, // 音符高亮：跨小节的后半部分音符也要有 ID
         isRest: item.isRest
       };
       if (!item.isRest) {
@@ -788,16 +836,34 @@ function drawScore() {
 
         // 【关键】VexFlow 会把 extra space 均匀撒在音符之间
         formatter.format([voice], availableWidth);
-
+        // 音符高亮
+        measure.notes.forEach((note) => {
+          // 如果该音符的源ID 等于 当前选中的ID
+          if (note.sourceNoteId && note.sourceNoteId === selectedNoteId.value) {
+            note.setStyle({ fillStyle: '#ff4d4f', strokeStyle: '#ff4d4f' }); // 红色高亮
+          } else {
+            // 确保非选中音符恢复默认样式 (黑色)
+            note.setStyle({ fillStyle: 'black', strokeStyle: 'black' });
+          }
+        });
         voice.draw(ctx, stave);
 
         measure.notes.forEach((note) => {
           let noteX = stave.getX() + 50;
+           let bbox = null;// 音符高亮
           try {
             noteX = note.getAbsoluteX();
+            // 获取音符的包围盒 (x, y, w, h)
+            bbox = note.getBoundingBox();
           } catch (e) {}
           if (note.sourceRawIndex !== undefined) {
-            visualMaps[staveObj.id].push({ x: noteX, rawIndex: note.sourceRawIndex });
+            // 存入 visualMaps，包含 id 和 包围盒
+            visualMaps[staveObj.id].push({ 
+              x: noteX, 
+              rawIndex: note.sourceRawIndex,
+              id: note.sourceNoteId, // 原始ID
+              bbox: bbox // 碰撞区域
+            });
           }
         });
 
