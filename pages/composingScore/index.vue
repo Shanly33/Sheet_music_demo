@@ -8,6 +8,10 @@
 
   <image v-if="isDragging" class="drag-ghost" :style="ghostStyle" :src="selected.icon" mode="aspectFit" />
   <!-- 音符工具栏 -->
+  <view class="note_tools" >
+    <view class="item add" @click="addStave">新增一行</view>
+    <view class="item delete" @click="deleteSelectedNote">删除</view>
+  </view>
   <view class="note-bar">
     <view
       v-for="d in durations"
@@ -24,13 +28,13 @@
     </view>
   </view>
   <view class="tools">
-    <view class="control-panel">
+    <!-- <view class="control-panel">
       <view class="add-btn" @click="addStave">
         <text style="font-size: 16px; margin-right: 4px">+</text>
         新增一行乐谱
       </view>
       <view class="info-text">当前选中：第 {{ activeStaveIndex + 1 }} 行</view>
-    </view>
+    </view> -->
 
     <!-- 配置区域：操作的是当前选中的 Stave -->
     <view class="musicConfig" v-if="activeStaveConfig">
@@ -894,6 +898,22 @@ function drawScore() {
     cursorY += actualHeight;
   });
 }
+/**
+ * 删除当前选中音符
+ */
+function deleteSelectedNote() {
+  if (!selectedNoteId.value) return;
+
+  const stave = staveList.value.find(s => s.id === activeStaveId.value);
+  if (stave) {
+    const idx = stave.notes.findIndex(n => n.id === selectedNoteId.value);
+    if (idx > -1) {
+      stave.notes.splice(idx, 1);
+      selectedNoteId.value = null; // 清空选中
+      drawScore();
+    }
+  }
+}
 </script>
 
 <style scoped lang="scss">
@@ -931,17 +951,17 @@ function drawScore() {
 }
 .note-bar {
   display: flex;
-  gap: 10px;
-  padding: 10px;
+  gap: 20rpx;
+  padding: 10rpx;
   border-top: 1px solid #eee;
   flex-wrap: wrap;
 }
 .note-btn {
   text-align: center;
-  padding: 5px;
+  padding: 10rpx;
   border: 1px solid #ccc;
-  border-radius: 8px;
-  min-width: 60px;
+  border-radius: 10rpx;
+  font-size: 24rpx;
 }
 .note-btn.active {
   background: #e6f7ff;
@@ -991,5 +1011,16 @@ function drawScore() {
 .tools {
   height: 30vh;
   overflow-y: auto;
+}
+.note_tools{
+  display: flex;
+  padding:10rpx 20rpx;
+  font-size: 24rpx;
+  gap:20rpx;
+  .item{
+    padding: 4rpx 10rpx;
+    border-radius: 6rpx;
+    border: 1px solid #ddd;
+  }
 }
 </style>
