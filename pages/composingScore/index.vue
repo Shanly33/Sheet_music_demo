@@ -1,15 +1,30 @@
 <template>
   <scroll-view scroll-x scroll-y class="score-scroll-container">
     <!-- 绑定 dynamicHeight -->
-    <view class="canvas-wrapper" :style="{ width: scoreWidth + 'px', height: dynamicHeight + 'px' }">
-      <canvas id="scoreCanvas" canvas-id="scoreCanvas" type="2d" :style="{ width: scoreWidth + 'px', height: dynamicHeight + 'px' }" @touchstart="onCanvasClick" />
+    <view
+      class="canvas-wrapper"
+      :style="{ width: scoreWidth + 'px', height: dynamicHeight + 'px' }"
+    >
+      <canvas
+        id="scoreCanvas"
+        canvas-id="scoreCanvas"
+        type="2d"
+        :style="{ width: scoreWidth + 'px', height: dynamicHeight + 'px' }"
+        @touchstart="onCanvasClick"
+      />
     </view>
   </scroll-view>
 
-  <image v-if="isDragging" class="drag-ghost" :style="ghostStyle" :src="selected.icon" mode="aspectFit" />
+  <image
+    v-if="isDragging"
+    class="drag-ghost"
+    :style="ghostStyle"
+    :src="selected.icon"
+    mode="aspectFit"
+  />
   <!-- 音符工具栏 -->
-  <view class="note_tools" >
-    <view class="item add" @click="addStave">新增一行</view>
+  <view class="note_tools">
+    <!-- <view class="item add" @click="addStave">新增一行</view> -->
     <view class="item delete" @click="deleteSelectedNote">删除</view>
   </view>
   <view class="note-bar">
@@ -18,7 +33,6 @@
       :key="d.id"
       class="note-btn"
       :class="{ active: selected?.id === d.id }"
-      @tap.stop="selected = d"
       @touchstart.stop="(e) => onDragStart(e, d)"
       @touchmove.stop="onDragMove"
       @touchend.stop="onDragEnd"
@@ -27,6 +41,21 @@
       <view class="note-label">{{ d.label }}</view>
     </view>
   </view>
+  <view class="modifier-tools">
+    <!-- 临时记号 -->
+    <view class="tool-group">
+      <view
+        v-for="a in accidentals"
+        :key="a.id"
+        class="item"
+        :class="{ active: selectedAccidental === a.value }"
+        @tap="selectAccidental(a.value)"
+      >
+        {{ a.label }}
+      </view>
+    </view>
+  </view>
+
   <view class="tools">
     <!-- <view class="control-panel">
       <view class="add-btn" @click="addStave">
@@ -40,7 +69,13 @@
     <view class="musicConfig" v-if="activeStaveConfig">
       <view class="section-title">谱号 (Clef)</view>
       <view class="clef">
-        <view class="item" :class="{ active: activeStaveConfig.clef === item.value }" @click="updateStaveConfig('clef', item.value)" v-for="item in clefList" :key="item.value">
+        <view
+          class="item"
+          :class="{ active: activeStaveConfig.clef === item.value }"
+          @click="updateStaveConfig('clef', item.value)"
+          v-for="item in clefList"
+          :key="item.value"
+        >
           {{ item.label }}
         </view>
       </view>
@@ -142,9 +177,50 @@ const durations = [
   { id: '64', label: '64分', duration: '64', icon: '/static/icons/notes/16.png' },
   { id: 'qr', label: '休止', duration: 'qr', icon: '/static/icons/notes/16.png' }
 ];
+// 修饰符
+const accidentals = [
+  { id: "none", label: "无", value: null },
+  { id: "#", label: "♯", value: "#" },
+  { id: "b", label: "♭", value: "b" },
+  { id: "n", label: "♮", value: "n" },
+  { id: "##", label: "𝄪", value: "##" },
+  { id: "bb", label: "𝄫", value: "bb" },
+];
 
 const selected = ref(durations[2]);
 let VF = null;
+const selectedAccidental=ref(null)
+// 选中修饰符
+function selectAccidental(a) {
+  selectedAccidental.value = a;
+}
+// 处理音符按钮点击：切换工具 OR 修改选中音符时值
+const onNoteBtnClick=(d)=> {
+  // 1. 无论如何，先把当前工具选中（视觉反馈）
+  selected.value = d;
+
+  // 2. 如果当前有选中的音符 (selectedNoteId 不为空)
+  if (selectedNoteId.value) {
+    // 找到当前激活的 Stave
+    const stave = staveList.value.find((s) => s.id === activeStaveId.value);
+    if (!stave) return;
+
+    // 在该 Stave 中找到对应的音符数据
+    const targetNote = stave.notes.find((n) => n.id === selectedNoteId.value);
+    if (targetNote) {
+      // 3. 修改音符数据的时值
+      targetNote.duration = d.duration;
+
+      // 特殊处理：如果是修改为休止符，或者从休止符改回音符，可能需要处理 pitch
+      // 这里简易处理：processNotesToMeasures 里的逻辑已经能处理 'qr', '8r' 等字符串
+      // 如果你希望变成休止符后 pitch 归位到中间线，可以在这里重置 targetNote.pitch = 'B/4'
+      // 但保留原音高通常更符合直觉（方便改回音符）
+
+      // 4. 重绘乐谱
+      drawScore();
+    }
+  }
+}
 
 // ============================================================
 // 初始化与工具
@@ -272,7 +348,7 @@ function onCanvasClick(e) {
     // 1. 遍历所有行，查找是否点中了某个音符
     for (let staveIdStr in visualMaps) {
       const notesVisuals = visualMaps[staveIdStr];
-      
+
       // 遍历该行所有可见音符
       for (let i = 0; i < notesVisuals.length; i++) {
         const visual = notesVisuals[i];
@@ -316,14 +392,34 @@ function onCanvasClick(e) {
     drawScore();
   });
 }
-
+// 【新增】用于区分点击和拖拽的临时变量
+const dragStartPoint = { x: 0, y: 0 };
+const dragThreshold = 5; // 移动超过5px才算拖拽
 function onDragStart(e, d) {
+   const touch = e.touches ? e.touches[0] : e.changedTouches[0];
+  dragStartPoint.x = touch.pageX;
+  dragStartPoint.y = touch.pageY;
   selected.value = d;
-  isDragging.value = true;
+  isDragging.value = false;
   updateGhost(e);
 }
 function onDragMove(e) {
-  if (isDragging.value) updateGhost(e);
+  const touch = e.touches ? e.touches[0] : e.changedTouches[0];
+  if (!touch) return;
+
+  // 2. 计算移动距离
+  const deltaX = Math.abs(touch.pageX - dragStartPoint.x);
+  const deltaY = Math.abs(touch.pageY - dragStartPoint.y);
+
+  // 3. 只有移动距离超过阈值，才正式激活“拖拽模式”
+  if (!isDragging.value && (deltaX > dragThreshold || deltaY > dragThreshold)) {
+    isDragging.value = true;
+  }
+
+  // 4. 如果是拖拽模式，更新幽灵图标位置
+  if (isDragging.value) {
+    updateGhost(e);
+  }
 }
 function updateGhost(e) {
   const touch = e.touches ? e.touches[0] : e.changedTouches[0];
@@ -334,8 +430,18 @@ function updateGhost(e) {
 }
 
 function onDragEnd(e) {
-  if (!isDragging.value) return;
-  const touch = e.changedTouches[0];
+
+  if (!isDragging.value){
+    if(selected.value) onNoteBtnClick(selected.value);
+  }else{
+    handleDrop(e);
+  };
+    isDragging.value = false;
+    ghostStyle.value = '';
+}
+// 音符拖拽落点
+function handleDrop(e){
+const touch = e.changedTouches[0];
   const rectQuery = uni.createSelectorQuery().in(instance.proxy).select('#scoreCanvas').boundingClientRect();
 
   rectQuery.exec((res) => {
@@ -395,11 +501,9 @@ function onDragEnd(e) {
         }
       }
     }
-    isDragging.value = false;
-    ghostStyle.value = '';
+
   });
 }
-
 function insertNoteToStave(staveId, targetX, pitch, duration) {
   const stave = staveList.value.find((s) => s.id === staveId);
   if (!stave) return;
@@ -580,12 +684,12 @@ function processNotesToMeasures(rawNotes, timeSignature = '4/4', clef = 'treble'
         keys: vfKeys,
         duration: vfDuration,
         auto_stem: !originalItem.isRest,
-        clef: clef 
+        clef: clef
       });
 
       // 音符高亮，将原始音符ID挂载到 VexFlow 对象上
-      vfNote.sourceNoteId = originalItem.id; 
-      
+      vfNote.sourceNoteId = originalItem.id;
+
       return vfNote;
     };
 
@@ -632,7 +736,7 @@ function processNotesToMeasures(rawNotes, timeSignature = '4/4', clef = 'treble'
       // 1. 获取音符的纯时值字符串（去掉 'r' 等修饰，例如 '8r' -> '8'）
       // 注意：VexFlow note.duration 可能是 '8', 'q', 'h', '8r' 等
       const durationKey = note.duration.replace('r', '');
-      
+
       // 2. 判断是否为休止符
       const isRest = note.duration.includes('r');
 
@@ -862,8 +966,8 @@ function drawScore() {
           } catch (e) {}
           if (note.sourceRawIndex !== undefined) {
             // 存入 visualMaps，包含 id 和 包围盒
-            visualMaps[staveObj.id].push({ 
-              x: noteX, 
+            visualMaps[staveObj.id].push({
+              x: noteX,
               rawIndex: note.sourceRawIndex,
               id: note.sourceNoteId, // 原始ID
               bbox: bbox // 碰撞区域
@@ -993,12 +1097,12 @@ function deleteSelectedNote() {
   .keySignatureList {
     display: flex;
     flex-wrap: wrap;
-    gap: 8px;
+    gap: 10rpx;
     .item {
-      padding: 6px 12px;
+      padding: 6rpx 12rpx;
       border: 1px solid #ddd;
-      border-radius: 4px;
-      font-size: 12px;
+      border-radius: 8rpx;
+      font-size: 24rpx;
       background: #fff;
       &.active {
         background: #1890ff;
@@ -1012,7 +1116,7 @@ function deleteSelectedNote() {
   height: 30vh;
   overflow-y: auto;
 }
-.note_tools{
+.note_tools,.modifier-tools .tool-group{
   display: flex;
   padding:10rpx 20rpx;
   font-size: 24rpx;
@@ -1021,6 +1125,12 @@ function deleteSelectedNote() {
     padding: 4rpx 10rpx;
     border-radius: 6rpx;
     border: 1px solid #ddd;
+     &.active {
+        background: #1890ff;
+        color: #fff;
+        border-color: #1890ff;
+      }
   }
 }
+
 </style>
