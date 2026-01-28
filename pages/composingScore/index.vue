@@ -66,6 +66,7 @@
     </view> -->
 
     <!-- 配置区域：操作的是当前选中的 Stave -->
+     <up-subsection :list="list" :current="current"></up-subsection>
     <view class="musicConfig" v-if="activeStaveConfig">
       <view class="section-title">谱号 (Clef)</view>
       <view class="clef">
@@ -143,7 +144,8 @@ const activeStaveConfig = computed(() => {
   const stave = staveList.value.find((s) => s.id === activeStaveId.value);
   return stave ? stave.config : { clef: 'treble', keySignature: 'C', timeSignature: '4/4' };
 });
-
+const list = ref(['谱号', '调号', '拍号']);  
+const current = ref(1); 
 // --- 常量定义 ---
 const clefList = [
   { value: 'treble', label: '高音' },
@@ -190,6 +192,30 @@ const accidentals = [
 const selected = ref(durations[2]);
 let VF = null;
 const selectedAccidental=ref(null)
+// 【新增】存储当前选中音符的详细信息
+const selectedNoteInfo = ref({
+  step: '',       // 音名 (C, D, E...)
+  accidental: '', // 修饰符 (#, b, n, bb...)
+  octave: '',     // 八度 (3, 4, 5...)
+  pitch: ''       // 完整 pitch 字符串
+});
+/**
+ * 解析 pitch 字符串
+ * @param {String} pitchStr 例如 "C#/4", "Bb/5", "C/4"
+ */
+function parsePitch(pitchStr) {
+  if (!pitchStr) return { step: '', accidental: '', octave: '' };
+  
+  const [key, octave] = pitchStr.split('/'); // 分割 "C#" 和 "4"
+  const step = key[0]; // "C"
+  const accidental = key.substring(1); // "#" 或 "b" 或 "" (空字符串表示无修饰符)
+  
+  return {
+    step,
+    accidental,
+    octave
+  };
+}
 // 选中修饰符
 function selectAccidental(a) {
   selectedAccidental.value = a;
@@ -207,6 +233,8 @@ const onNoteBtnClick=(d)=> {
 
     // 在该 Stave 中找到对应的音符数据
     const targetNote = stave.notes.find((n) => n.id === selectedNoteId.value);
+    console.log("notes",targetNote);
+    
     if (targetNote) {
       // 3. 修改音符数据的时值
       targetNote.duration = d.duration;
@@ -328,7 +356,7 @@ function initCanvas() {
 }
 
 // ============================================================
-// 交互：点击 & 拖拽
+// canvas交互：点击 & 拖拽
 // ============================================================
 
 function onCanvasClick(e) {
@@ -365,6 +393,25 @@ function onCanvasClick(e) {
             selectedNoteId.value = visual.id; // 选中音符
             activeStaveId.value = parseInt(staveIdStr); // 同时激活所在的行
             foundNote = true;
+            // 找到点击音符数据开始
+            const currentStave = staveList.value.find(s => s.id === parseInt(staveIdStr));
+            if (currentStave) {
+              // 2. 找到该音符原始数据
+              const rawNote = currentStave.notes.find(n => n.id === visual.id);
+              if (rawNote) {
+                // 3. 解析 Pitch 获取修饰符
+                const info = parsePitch(rawNote.pitch);
+                
+                selectedNoteInfo.value = {
+                  ...info,
+                  pitch: rawNote.pitch
+                };
+
+                console.log('选中音符详情：', selectedNoteInfo.value);
+                console.log('获取到的修饰符：', info.accidental); // 这里就是你要的 #, b
+              }
+            }
+            // 找到点击音符数据结束
             break;
           }
         }
@@ -376,7 +423,8 @@ function onCanvasClick(e) {
     if (!foundNote) {
       // 点击空白处，取消音符选中
       selectedNoteId.value = null;
-
+      // 清空点击音符详情
+      selectedNoteInfo.value = { step: '', accidental: '', octave: '', pitch: '' };
       for (let id in layoutMaps) {
         const layout = layoutMaps[id];
         // 扩大一点判定范围
@@ -689,7 +737,23 @@ function processNotesToMeasures(rawNotes, timeSignature = '4/4', clef = 'treble'
 
       // 音符高亮，将原始音符ID挂载到 VexFlow 对象上
       vfNote.sourceNoteId = originalItem.id;
-
+      // === 【新增】 手动处理升降号渲染 ===
+      // 只有非休止符才需要处理修饰符
+      if (!originalItem.isRest) {
+        // 解析 pitch 字符串，例如 "C#/4", "Bb/5", "D/4"
+        // 使用正则提取中间的修饰符部分
+        // 匹配规则：以字母开头，中间可能包含 # 或 b 或 n，最后是 /数字
+        const pitch = originalItem.pitch;
+        const match = pitch.match(/^([a-gA-G])([#b]+)?\/\d+$/);
+        
+        // match[2] 就是修饰符部分 (例如 "#", "b", "bb", "##")
+        if (match && match[2]) {
+          const acc = match[2];
+          // 给第 0 个音符（单音）添加修饰符
+          vfNote.addModifier(new VF.Accidental(acc), 0);
+        }
+      }
+      // ======================================
       return vfNote;
     };
 
@@ -797,7 +861,6 @@ function drawScore() {
     let rowWidth = 10;
     let rowMinY = 0;
     let rowMaxY = 80;
-
     measures.forEach((measure, index) => {
       // 1. Modifier (谱号/调号) 宽度计算
       const dummyStave = new VF.Stave(0, 0, 500);
@@ -816,9 +879,9 @@ function drawScore() {
         voice.addTickables(measure.notes);
 
         // 自动升降号
-        if (VF.Accidental) {
-          VF.Accidental.applyAccidentals([voice], staveObj.config.keySignature);
-        }
+        // if (VF.Accidental) {
+        //   VF.Accidental.applyAccidentals([voice], staveObj.config.keySignature);
+        // }
 
         const formatter = new VF.Formatter().joinVoices([voice]);
         // 这会让 VexFlow 计算出音符紧凑排列所需的“绝对最小宽度”
