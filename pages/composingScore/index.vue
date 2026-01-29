@@ -25,7 +25,8 @@
   <!-- 音符工具栏 -->
   <view class="note_tools">
     <!-- <view class="item add" @click="addStave">新增一行</view> -->
-    <view class="item delete" @click="deleteSelectedNote">删除</view>
+    <view class="item delete" @click="deleteSelectedNote">删除音符</view>
+    <view class="item delete" @click="deleteSelectedNote">全部清空</view>
   </view>
   <view class="note-bar">
     <view
@@ -41,20 +42,7 @@
       <view class="note-label">{{ d.label }}</view>
     </view>
   </view>
-  <view class="modifier-tools">
-    <!-- 临时记号 -->
-    <view class="tool-group">
-      <view
-        v-for="a in accidentals"
-        :key="a.id"
-        class="item"
-        :class="{ active: selectedAccidental === a.value }"
-        @tap="selectAccidental(a.value)"
-      >
-        {{ a.label }}
-      </view>
-    </view>
-  </view>
+ 
 
   <view class="tools">
     <!-- <view class="control-panel">
@@ -66,10 +54,12 @@
     </view> -->
 
     <!-- 配置区域：操作的是当前选中的 Stave -->
-     <up-subsection :list="list" :current="current"></up-subsection>
+     
     <view class="musicConfig" v-if="activeStaveConfig">
-      <view class="section-title">谱号 (Clef)</view>
-      <view class="clef">
+      <view class="tablist">
+        <view  class="item" :class="{active:current===index}" @click="current=index" v-for="(item,index) in list" :key="item">{{ item }}</view>
+      </view>
+      <view class="clef" v-if="current===0">
         <view
           class="item"
           :class="{ active: activeStaveConfig.clef === item.value }"
@@ -81,8 +71,7 @@
         </view>
       </view>
 
-      <view class="section-title">拍号 (Time Signature)</view>
-      <view class="timeSignatureList">
+      <view class="timeSignatureList" v-if="current===1">
         <view
           class="item"
           :class="{ active: activeStaveConfig.timeSignature === item.id }"
@@ -94,8 +83,7 @@
         </view>
       </view>
 
-      <view class="section-title">调号 (Key Signature)</view>
-      <view class="keySignatureList">
+      <view class="keySignatureList" v-if="current===2">
         <view
           class="item"
           :class="{ active: activeStaveConfig.keySignature === item.id }"
@@ -105,7 +93,28 @@
         >
           {{ item.id }}
         </view>
+      </view> 
+      <view class="modifier-tools" v-if="current===3">
+    <!-- 临时记号 -->
+    <view class="tool-group">
+      <view
+        v-for="a in accidentals"
+        :key="a.id"
+        class="item"
+        :class="{ active: selectedAccidental === a.value }"
+        @tap="updateNoteAccidental(a.value)"
+      >
+        {{ a.label }}
       </view>
+       <view 
+      class="item" 
+      :class="{ active: isNoteDotted }" 
+      @tap="toggleNoteDot"
+    >
+      附点 (.)
+    </view>
+    </view>
+  </view>
     </view>
   </view>
 </template>
@@ -144,7 +153,7 @@ const activeStaveConfig = computed(() => {
   const stave = staveList.value.find((s) => s.id === activeStaveId.value);
   return stave ? stave.config : { clef: 'treble', keySignature: 'C', timeSignature: '4/4' };
 });
-const list = ref(['谱号', '调号', '拍号']);  
+const list = ref(['谱号', '调号', '拍号','修饰符']);  
 const current = ref(1); 
 // --- 常量定义 ---
 const clefList = [
@@ -162,31 +171,32 @@ const keySignatureList = [
   { id: 'E' },
   { id: 'B' },
   { id: 'F#' },
+  { id: 'C#' },
   { id: 'F' },
   { id: 'Bb' },
   { id: 'Eb' },
   { id: 'Ab' },
   { id: 'Db' },
-  { id: 'Gb' }
+  { id: 'Gb' },
+  { id: 'Cb' }
 ];
 const durations = [
-  { id: 'w', label: '全音符', duration: 'w', icon: '/static/icons/notes/w.png' },
-  { id: 'h', label: '2分', duration: 'h', icon: '/static/icons/notes/h.png' },
-  { id: 'q', label: '4分', duration: 'q', icon: '/static/icons/notes/q.png' },
-  { id: '8', label: '8分', duration: '8', icon: '/static/icons/notes/8.png' },
-  { id: '16', label: '16分', duration: '16', icon: '/static/icons/notes/16.png' },
-  { id: '32', label: '32分', duration: '32', icon: '/static/icons/notes/16.png' },
-  { id: '64', label: '64分', duration: '64', icon: '/static/icons/notes/16.png' },
-  { id: 'qr', label: '休止', duration: 'qr', icon: '/static/icons/notes/16.png' }
+  { id: 'w', label: '1', duration: 'w', icon: '/static/icons/notes/w.png' },
+  { id: 'h', label: '1/2', duration: 'h', icon: '/static/icons/notes/h.png' },
+  { id: 'q', label: '1/4', duration: 'q', icon: '/static/icons/notes/q.png' },
+  { id: '8', label: '1/8', duration: '8', icon: '/static/icons/notes/8.png' },
+  { id: '16', label: '1/16', duration: '16', icon: '/static/icons/notes/16.png' },
+  { id: '32', label: '1/32', duration: '32', icon: '/static/icons/notes/16.png' },
+  { id: '64', label: '1/64', duration: '64', icon: '/static/icons/notes/16.png' },
+  { id: 'qr', label: '休止符', duration: 'qr', icon: '/static/icons/notes/16.png' }
 ];
 // 修饰符
 const accidentals = [
-  { id: "none", label: "无", value: null },
-  { id: "#", label: "♯", value: "#" },
-  { id: "b", label: "♭", value: "b" },
-  { id: "n", label: "♮", value: "n" },
-  { id: "##", label: "𝄪", value: "##" },
-  { id: "bb", label: "𝄫", value: "bb" },
+  { id: "#", label: "♯", value: "#",selected:false },
+  { id: "b", label: "♭", value: "b",selected:false  },
+  { id: "n", label: "♮", value: "n" ,selected:false },
+  { id: "##", label: "𝄪", value: "##" ,selected:false },
+  { id: "bb", label: "𝄫", value: "bb" ,selected:false },
 ];
 
 const selected = ref(durations[2]);
@@ -199,6 +209,7 @@ const selectedNoteInfo = ref({
   octave: '',     // 八度 (3, 4, 5...)
   pitch: ''       // 完整 pitch 字符串
 });
+const isNoteDotted = ref(false); // 【新增】当前选中音符是否带附点
 /**
  * 解析 pitch 字符串
  * @param {String} pitchStr 例如 "C#/4", "Bb/5", "C/4"
@@ -217,8 +228,67 @@ function parsePitch(pitchStr) {
   };
 }
 // 选中修饰符
-function selectAccidental(a) {
-  selectedAccidental.value = a;
+// function selectAccidental(a) {
+//   selectedAccidental.value = a;
+// }
+/**
+ * 修改当前选中音符的修饰符
+ * @param {String} accValue  修饰符值: '#', 'b', 'n', '##', 'bb' 或 null
+ */
+function updateNoteAccidental(accValue) {
+  
+  // 1. 更新 UI 选中状态
+  selectedAccidental.value = accValue===selectedAccidental.value?'':accValue;
+
+  // 2. 如果没有选中音符，则直接返回（或者你可以设计为设置“默认修饰符”）
+  if (!selectedNoteId.value) return;
+
+  // 3. 查找并修改数据
+  const stave = staveList.value.find(s => s.id === activeStaveId.value);
+  if (!stave) return;
+  const note = stave.notes.find(n => n.id === selectedNoteId.value);
+
+  if (note) {
+    // 解析当前 pitch，保持音名(step)和八度(octave)不变，只替换修饰符
+    const { step, octave } = parsePitch(note.pitch);
+    let newAccSuffix = selectedAccidental.value;
+    
+    note.pitch = `${step}${newAccSuffix}/${octave}`;
+    console.log("新的音符音高", note.pitch );
+    
+    
+    // 重绘
+    drawScore();
+  }
+}
+
+/**
+ * 切换当前选中音符的附点状态
+ */
+function toggleNoteDot() {
+  if (!selectedNoteId.value) return;
+
+  const stave = staveList.value.find(s => s.id === activeStaveId.value);
+  if (!stave) return;
+  const note = stave.notes.find(n => n.id === selectedNoteId.value);
+
+  if (note) {
+    // 切换状态
+    isNoteDotted.value = !isNoteDotted.value;
+
+    // 修改 duration 字符串
+    // 规则：如果有 'd' 去掉，没有 'd' 加上
+    if (isNoteDotted.value) {
+      if (!note.duration.includes('d')) {
+        note.duration += 'd';
+      }
+    } else {
+      note.duration = note.duration.replace('d', '');
+    }
+    
+    // 重绘
+    drawScore();
+  }
 }
 // 处理音符按钮点击：切换工具 OR 修改选中音符时值
 const onNoteBtnClick=(d)=> {
@@ -393,7 +463,7 @@ function onCanvasClick(e) {
             selectedNoteId.value = visual.id; // 选中音符
             activeStaveId.value = parseInt(staveIdStr); // 同时激活所在的行
             foundNote = true;
-            // 找到点击音符数据开始
+            // 找到点击音符数据================================================
             const currentStave = staveList.value.find(s => s.id === parseInt(staveIdStr));
             if (currentStave) {
               // 2. 找到该音符原始数据
@@ -406,12 +476,14 @@ function onCanvasClick(e) {
                   ...info,
                   pitch: rawNote.pitch
                 };
-
+                selectedAccidental.value = info.accidental || null; //修饰符回显
+                isNoteDotted.value = rawNote.duration.indexOf('d') !== -1;//附点回显
                 console.log('选中音符详情：', selectedNoteInfo.value);
                 console.log('获取到的修饰符：', info.accidental); // 这里就是你要的 #, b
+                  console.log('回显 - 修饰符:', selectedAccidental.value, '附点:', isNoteDotted.value);
               }
             }
-            // 找到点击音符数据结束
+            // 找到点击音符数据========================================================
             break;
           }
         }
@@ -648,6 +720,7 @@ function calculatePitchFromY(y, stave, config) {
 
   return `${noteName}${acc}/${octave}`;
 }
+
 // ============================================================
 // 数据处理逻辑 (支持动态拍号 + 动态谱号)
 // ============================================================
@@ -657,180 +730,289 @@ function processNotesToMeasures(rawNotes, timeSignature = '4/4', clef = 'treble'
   let currentMeasure = { notes: [], ties: [], beams: [] };
   let currentTicks = 0;
 
-  const RESOLUTION = VF.RESOLUTION;
+  const RESOLUTION = Vex.Flow.RESOLUTION; 
   const [numStr, denStr] = timeSignature.split('/');
   const num = parseInt(numStr) || 4;
   const den = parseInt(denStr) || 4;
   const ticksPerBeatUnit = RESOLUTION / den;
   const maxTicksPerMeasure = ticksPerBeatUnit * num;
 
-  const durationTicks = {
-    w: RESOLUTION,
-    h: RESOLUTION / 2,
-    q: RESOLUTION / 4,
-    8: RESOLUTION / 8,
-    16: RESOLUTION / 16,
-    32: RESOLUTION / 32,
-    64: RESOLUTION / 64,
-    qr: RESOLUTION / 4,
-    hr: RESOLUTION / 2,
-    wr: RESOLUTION,
-    '8r': RESOLUTION / 8,
-    '16r': RESOLUTION / 16,
-    '32r': RESOLUTION / 32,
-    '64r': RESOLUTION / 64
-  };
-  function getBestDuration(ticks) {
-    if (ticks >= durationTicks['w']) return 'w';
-    if (ticks >= durationTicks['h']) return 'h';
-    if (ticks >= durationTicks['q']) return 'q';
-    if (ticks >= durationTicks['8']) return '8';
-    if (ticks >= durationTicks['16']) return '16';
-    if (ticks >= durationTicks['32']) return '32';
-    return '64';
+  // 1. 定义标准时值映射（从大到小排列，用于贪心拆解）
+  // 注意：VexFlow 中 'd' 表示附点，时值是 1.5 倍
+  const DURATION_CONFIGS = [
+    { name: 'w',  ticks: RESOLUTION },           // 全音符
+    { name: 'hd', ticks: RESOLUTION / 2 * 1.5 }, // 附点二分
+    { name: 'h',  ticks: RESOLUTION / 2 },       // 二分
+    { name: 'qd', ticks: RESOLUTION / 4 * 1.5 }, // 附点四分
+    { name: 'q',  ticks: RESOLUTION / 4 },       // 四分
+    { name: '8d', ticks: RESOLUTION / 8 * 1.5 }, // 附点八分
+    { name: '8',  ticks: RESOLUTION / 8 },       // 八分
+    { name: '16d',ticks: RESOLUTION / 16 * 1.5}, // 附点十六
+    { name: '16', ticks: RESOLUTION / 16 },      // 十六分
+    { name: '32', ticks: RESOLUTION / 32 },      // 三十二分
+    { name: '64', ticks: RESOLUTION / 64 }       // 六十四分
+  ];
+
+   // 辅助：获取输入字符串的总 Ticks
+  function getDurationTicks(durationStr) {
+    // 1. 定义纯净的基础时值映射 (不含附点)
+    const baseDurationMap = {
+      'w': RESOLUTION,
+      'h': RESOLUTION / 2,
+      'q': RESOLUTION / 4,
+      '8': RESOLUTION / 8,
+      '16': RESOLUTION / 16,
+      '32': RESOLUTION / 32,
+      '64': RESOLUTION / 64
+    };
+
+    // 2. 提取基础键名 (移除 'r' 和 'd')
+    // 例如: "q" -> "q", "qd" -> "q", "8r" -> "8"
+    const baseKey = durationStr.replace(/[rd]/g, '');
+
+    // 3. 获取基础 ticks
+    let ticks = baseDurationMap[baseKey];
+    
+    // 兜底：如果没找到，默认按四分音符处理，防止崩溃
+    if (!ticks) ticks = RESOLUTION / 4; 
+
+    // 4. 如果输入字符串明确包含 'd'，则乘以 1.5
+    if (durationStr.includes('d')) {
+      ticks *= 1.5;
+    }
+
+    return ticks;
   }
 
+  /**
+   * 核心算法：将任意 ticks 拆解为一组标准的 VexFlow 音符时长
+   * 例如：2.5拍 (2560 ticks) -> [ 'h', '8' ] (二分 + 八分)
+   */
+  function decomposeDuration(ticks) {
+    const result = [];
+    let remaining = ticks;
+
+    // 贪心算法：每次都取能塞下的最大音符
+    while (remaining > 10) { // 允许极小误差
+      let matched = false;
+      for (const config of DURATION_CONFIGS) {
+        if (remaining >= config.ticks) {
+          result.push({
+            duration: config.name.replace('d', ''), // VexFlow duration 基础名 (如 'h')
+            isDotted: config.name.includes('d'),    // 是否有附点
+            ticks: config.ticks
+          });
+          remaining -= config.ticks;
+          matched = true;
+          break; 
+        }
+      }
+      // 防止死循环（如果有无法处理的极小剩余，强制退出）
+      if (!matched) break;
+    }
+    return result;
+  }
+
+  // 2. 初始化队列
   let noteQueue = rawNotes.map((n, index) => ({
     pitch: n.pitch,
     rawDuration: n.duration,
-    totalTicks: durationTicks[n.duration] || durationTicks['q'],
+    totalTicks: getDurationTicks(n.duration),
     rawIndex: index,
-    id: n.id, // <--- 关键：音符高亮保留原始ID
-    isRest: n.duration.indexOf('r') !== -1
+    id: n.id,
+    isRest: n.duration.includes('r'),
+    // 标记是否为连音线的中间部分（如果是被拆解出来的，需要连线）
+    tieStart: false, 
+    tieEnd: false
   }));
 
-  let noteIndex = 0;
-  let pendingNote = null;
+  let queueIndex = 0;
+  // pendingParts 用于存储同一个原始音符被拆解后的后续部分（为了保持 rawIndex 和 id）
+  let pendingParts = []; 
 
-  while (noteIndex < noteQueue.length || pendingNote) {
-    let item = pendingNote || noteQueue[noteIndex];
+  while (queueIndex < noteQueue.length || pendingParts.length > 0) {
+    // 优先处理 pendingParts (同一个音符拆出来的部分)，否则处理队列下一个
+    let item = pendingParts.length > 0 ? pendingParts.shift() : noteQueue[queueIndex];
+    
+    // 如果是从队列拿的新音符，索引+1；如果是 pendingParts，索引不变
+    if (pendingParts.length === 0 && item === noteQueue[queueIndex]) {
+        queueIndex++;
+    }
+
     const ticksSpace = maxTicksPerMeasure - currentTicks;
 
+    // A. 换行判断：剩余空间太小，直接换小节
     if (ticksSpace <= 10) {
       measures.push(currentMeasure);
       currentMeasure = { notes: [], ties: [], beams: [] };
       currentTicks = 0;
+      // 当前 item 还没处理，放回 pendingParts 头部，下一轮循环处理
+      pendingParts.unshift(item); 
       continue;
     }
 
-    if (!pendingNote) noteIndex++;
+    // B. 计算当前小节应该吃掉多少 ticks
+    // 如果音符能塞下，就全吃；塞不下，就吃掉 ticksSpace (剩余空间)
+    const takeTicks = Math.min(item.totalTicks, ticksSpace);
+    const remainingTicks = item.totalTicks - takeTicks;
 
-    const createVexNote = (ticks, originalItem) => {
-      let baseDuration = getBestDuration(ticks);
-      let vfKeys = [originalItem.pitch];
-      let vfDuration = baseDuration;
+    // C. 将 takeTicks 拆解为标准音符组合 (Decompose)
+    // 即使能塞下，也可能需要拆分（例如 2.5 拍塞入 4/4 拍，需要拆成 二分+八分）
+    const parts = decomposeDuration(takeTicks);
 
-      // 休止符位置处理
-      if (originalItem.isRest) {
-        // 根据谱号调整休止符的默认位置，让它好看点
-        // 默认 b/4 在高音谱号是中间，但在低音谱号可能偏了，通常 b/4 是通用的中间线
+    // D. 生成 VexFlow 音符
+    parts.forEach((part, pIndex) => {
+      let vfKeys = [item.pitch];
+      let vfDuration = part.duration; 
+      
+      // 休止符处理
+      if (item.isRest) {
         vfKeys = ['b/4'];
-        vfDuration = baseDuration + 'r';
+        vfDuration += 'r';
       }
 
-     const vfNote = new VF.StaveNote({
+      const vfNote = new VF.StaveNote({
         keys: vfKeys,
         duration: vfDuration,
-        auto_stem: !originalItem.isRest,
+        auto_stem: !item.isRest,
         clef: clef
       });
 
-      // 音符高亮，将原始音符ID挂载到 VexFlow 对象上
-      vfNote.sourceNoteId = originalItem.id;
-      // === 【新增】 手动处理升降号渲染 ===
-      // 只有非休止符才需要处理修饰符
-      if (!originalItem.isRest) {
-        // 解析 pitch 字符串，例如 "C#/4", "Bb/5", "D/4"
-        // 使用正则提取中间的修饰符部分
-        // 匹配规则：以字母开头，中间可能包含 # 或 b 或 n，最后是 /数字
-        const pitch = originalItem.pitch;
-        const match = pitch.match(/^([a-gA-G])([#b]+)?\/\d+$/);
+      // 只有原始音符的第一部分才绑定 sourceNoteId (用于高亮)
+      // 或者所有部分都绑定，看你需求。这里都绑定以便选中整组
+      vfNote.sourceNoteId = item.id;
+      vfNote.sourceRawIndex = item.rawIndex;
+
+      // 添加附点
+      if (part.isDotted && !item.isRest) {
+         vfNote.addModifier(new VF.Dot(), 0);
+      }
+
+      // 添加升降号 (仅在非休止符且确实有修饰符时)
+      if (!item.isRest) {
+         const match = item.pitch.match(/^([a-gA-G])([#bn]+)?\/\d+$/);
+         if (match && match[2]) {
+            vfNote.addModifier(new VF.Accidental(match[2]), 0);
+         }
+      }
+
+      // === 连音线 (Ties) 逻辑 ===
+      // 1. 它是跨小节的前半部分 (Incoming)
+      if (item.tieEnd && pIndex === 0 && !item.isRest) {
+         vfNote.isIncomingTie = true; // VexFlow 内部标记，或者手动处理
+      }
+
+      // 2. 它是被 Decompose 拆分出来的组 (例如 二分->八分)，内部需要连线
+      if (!item.isRest) {
+        // 如果不是组里的最后一个，说明要连到下一个
+        if (pIndex < parts.length - 1) {
+           currentMeasure.ties.push({ fromNote: vfNote, isInternal: true }); // 标记稍后处理
+        }
         
-        // match[2] 就是修饰符部分 (例如 "#", "b", "bb", "##")
-        if (match && match[2]) {
-          const acc = match[2];
-          // 给第 0 个音符（单音）添加修饰符
-          vfNote.addModifier(new VF.Accidental(acc), 0);
+        // 如果是组里的最后一个，且原始 item 还有剩余 ticks (跨小节)，则连到下一小节
+        if (pIndex === parts.length - 1 && remainingTicks > 10) {
+           currentMeasure.ties.push({ fromNote: vfNote, isCrossMeasure: true });
         }
       }
-      // ======================================
-      return vfNote;
-    };
 
-    if (item.totalTicks <= ticksSpace + 10) {
-      const vfNote = createVexNote(item.totalTicks, item);
-      vfNote.sourceRawIndex = item.rawIndex;
-      currentMeasure.notes.push(vfNote);
-      currentTicks += item.totalTicks;
-      if (item.isLinkedToPrevious && !item.isRest) vfNote.isIncomingTie = true;
-      pendingNote = null;
-    } else {
-      const firstPartTicks = ticksSpace;
-      const remainTicks = item.totalTicks - ticksSpace;
-      const note1 = createVexNote(firstPartTicks, item);
-      note1.sourceRawIndex = item.rawIndex;
-      currentMeasure.notes.push(note1);
-      currentTicks += firstPartTicks;
-
-      pendingNote = {
-        pitch: item.pitch,
-        rawDuration: item.rawDuration,
-        totalTicks: remainTicks,
-        isLinkedToPrevious: true,
-        rawIndex: item.rawIndex,
-        id: item.id, // 音符高亮：跨小节的后半部分音符也要有 ID
-        isRest: item.isRest
-      };
-      if (!item.isRest) {
-        currentMeasure.ties.push({ fromNote: note1, isCrossMeasure: true });
+      // 处理内部连线的配对 (将上一个 Internal tie 的 toNote 指向当前)
+      const lastTie = currentMeasure.ties[currentMeasure.ties.length - 1];
+      if (lastTie && lastTie.isInternal && !lastTie.last_note) {
+          // 这里 VexFlow 的 StaveTie 需要 first_note 和 last_note
+          // 我们在循环中只能拿到 first_note，last_note 需要在下一个循环拿到
+          // 但这里我们可以简单点：因为 parts 是连续生成的
+          // 实际上 VexFlow 创建 Tie 需要两个 Note 对象都存在。
+          // 更好的办法是：收集完 parts 生成的 notes 后，再批量创建 Tie
       }
+
+      currentMeasure.notes.push(vfNote);
+    });
+
+    // 修正内部连线的目标 (因为上面循环只是 push 了 notes，还没把 tie 连接起来)
+    // 遍历刚才生成的 parts 对应的 notes
+    const startIdx = currentMeasure.notes.length - parts.length;
+    for (let i = 0; i < parts.length - 1; i++) {
+        if (!item.isRest) {
+            const n1 = currentMeasure.notes[startIdx + i];
+            const n2 = currentMeasure.notes[startIdx + i + 1];
+            currentMeasure.ties.push({
+                first_note: n1,
+                last_note: n2,
+                first_indices: [0],
+                last_indices: [0]
+            });
+        }
+    }
+
+    // 更新当前小节 ticks
+    currentTicks += takeTicks;
+
+    // E. 如果还有剩余 (跨小节了)，生成新的 Pending Item
+    if (remainingTicks > 10) {
+        // 创建剩余部分的 item，插入到 pendingParts 头部，确保下次循环最先处理它
+        const remainderItem = {
+            ...item,
+            totalTicks: remainingTicks,
+            tieEnd: true, // 标记它是被连线过来的
+            // 注意：rawDuration 不再准确，仅供参考，计算全靠 totalTicks
+        };
+        pendingParts.unshift(remainderItem);
     }
   }
+
+  // 收尾
   if (currentMeasure.notes.length > 0 || measures.length === 0) {
     measures.push(currentMeasure);
   }
- // 定义哪些时值的音符支持符尾连线 (通常是 8分及更短)
+
+  // --- 3. 后处理：生成 Beam 和 Tie 对象 ---
   const beamableDurations = ['8', '16', '32', '64'];
-
   measures.forEach((m) => {
-    m.beams = [];
-    let noteGroup = []; // 当前正在收集的连续可连线音符组
-
-    m.notes.forEach((note) => {
-      // 1. 获取音符的纯时值字符串（去掉 'r' 等修饰，例如 '8r' -> '8'）
-      // 注意：VexFlow note.duration 可能是 '8', 'q', 'h', '8r' 等
-      const durationKey = note.duration.replace('r', '');
-
-      // 2. 判断是否为休止符
-      const isRest = note.duration.includes('r');
-
-      // 3. 判断是否可连线：必须在列表中，且不能是休止符（通常休止符打断连线）
-      const isBeamable = beamableDurations.includes(durationKey) && !isRest;
-
-      if (isBeamable) {
-        // 如果是可连线音符，加入当前组
-        noteGroup.push(note);
-      } else {
-        // --- 遇到不可连线音符（4分、2分、休止符），结算上一组 ---
-        if (noteGroup.length > 1) {
-          // 使用 generateBeams 自动处理组内的节拍划分（比如4个16分音符会自动分组）
-          const beams = VF.Beam.generateBeams(noteGroup, {
-            beam_rests: false,
-            beam_middle_only: false
-          });
-          m.beams.push(...beams);
+    // 处理 Beams
+    let noteGroup = [];
+    m.notes.forEach(note => {
+        const durationKey = note.duration.replace(/[rd]/g, '');
+        const isRest = note.duration.includes('r');
+        if (beamableDurations.includes(durationKey) && !isRest) {
+            noteGroup.push(note);
+        } else {
+            if (noteGroup.length > 1) m.beams.push(new VF.Beam(noteGroup));
+            noteGroup = [];
         }
-        // 清空组，重新开始
-        noteGroup = [];
-      }
     });
+    if (noteGroup.length > 1) m.beams.push(new VF.Beam(noteGroup));
 
-    // --- 循环结束后，处理最后可能残留的一组 ---
-    if (noteGroup.length > 1) {
-      const beams = VF.Beam.generateBeams(noteGroup);
-      m.beams.push(...beams);
+    // 处理 Ties (将简单的配置对象转换为 VexFlow StaveTie)
+    // 我们需要把跨小节的连线单独处理
+    const vfTies = [];
+    
+    // 内部连线 (measure 内的分解连线)
+    m.ties.forEach(t => {
+        if (t.first_note && t.last_note) {
+            vfTies.push(new VF.StaveTie({
+                first_note: t.first_note,
+                last_note: t.last_note,
+                first_indices: [0],
+                last_indices: [0]
+            }));
+        }
+    });
+    
+    // 跨小节连线逻辑：
+    // 找到本小节最后一个标记为 isCrossMeasure 的 tie
+    const crossTieConfig = m.ties.find(t => t.isCrossMeasure);
+    if (crossTieConfig) {
+        // 这里的逻辑需要拿到“下一小节的第一个音符”
+        // 由于我们在 map 过程中是线性的，很难直接拿到“下一小节对象”
+        // 技巧：在 VexFlow 渲染时 (drawScore)，会保存 prevMeasureLastNote
+        // 所以这里我们只保留标记，渲染层去实例化 StaveTie
     }
+    
+    // 覆盖 ties 数组为 VexFlow 对象 (保留 crossTieConfig 供渲染层使用)
+    m.vfTies = vfTies; // 渲染层用这个画内部连线
+    m.crossTie = crossTieConfig; // 渲染层用这个画跨小节连线
   });
+
   return measures;
 }
 
@@ -879,9 +1061,9 @@ function drawScore() {
         voice.addTickables(measure.notes);
 
         // 自动升降号
-        // if (VF.Accidental) {
-        //   VF.Accidental.applyAccidentals([voice], staveObj.config.keySignature);
-        // }
+        if (VF.Accidental) {
+          VF.Accidental.applyAccidentals([voice], staveObj.config.keySignature);
+        }
 
         const formatter = new VF.Formatter().joinVoices([voice]);
         // 这会让 VexFlow 计算出音符紧凑排列所需的“绝对最小宽度”
@@ -1038,10 +1220,27 @@ function drawScore() {
           }
         });
 
-        if (measure.beams) measure.beams.forEach((b) => b.setContext(ctx).draw());
-        if (needTieFromPrev && prevMeasureLastNote) {
+
+        
+        // 1. 画符尾连线 (Beams)
+        if (measure.beams) {
+          measure.beams.forEach((b) => b.setContext(ctx).draw());
+        }
+
+        // 2. 画小节内部的连线 (由 processNotesToMeasures 生成的 m.vfTies)
+        // 这些是同小节内音符拆分产生的连线 (例如 2.5拍拆成 二分+八分)
+        if (measure.vfTies) {
+          measure.vfTies.forEach((t) => t.setContext(ctx).draw());
+        }
+
+        // 3. 画跨小节连线 (连接 "上一小节末尾" -> "本小节开头")
+        if (needTieFromPrev && prevMeasureLastNote && measure.notes.length > 0) {
           const firstNote = measure.notes[0];
-          if (firstNote) {
+          
+          // 确保不是休止符才连线 (虽然 VexFlow 通常能处理，但加个判断更稳妥)
+          const isRest = firstNote.noteType === 'r' || (firstNote.duration && firstNote.duration.includes('r'));
+          
+          if (!isRest) {
             const tie = new VF.StaveTie({
               first_note: prevMeasureLastNote,
               last_note: firstNote,
@@ -1051,9 +1250,11 @@ function drawScore() {
             tie.setContext(ctx).draw();
           }
         }
-        const crossTie = measure.ties.find((t) => t.isCrossMeasure);
-        if (crossTie) {
-          prevMeasureLastNote = crossTie.fromNote;
+
+        // 4. 更新状态，供下一个小节使用
+        // 检查本小节是否有跨小节连线请求 (crossTie 包含 fromNote)
+        if (measure.crossTie) {
+          prevMeasureLastNote = measure.crossTie.fromNote;
           needTieFromPrev = true;
         } else {
           prevMeasureLastNote = null;
@@ -1089,7 +1290,7 @@ function deleteSelectedNote() {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 10px;
+  padding: 10px 20rpx;
   background-color: #f8f9fa;
   border-bottom: 1px solid #eee;
 }
@@ -1107,7 +1308,7 @@ function deleteSelectedNote() {
   color: #666;
 }
 .score-scroll-container {
-  width: 100%;
+  width: 100vw;
   height: 50vh;
   white-space: nowrap;
   background: #fff;
@@ -1119,16 +1320,15 @@ function deleteSelectedNote() {
 .note-bar {
   display: flex;
   gap: 20rpx;
-  padding: 10rpx;
-  border-top: 1px solid #eee;
+  padding: 10rpx 20rpx;
   flex-wrap: wrap;
 }
 .note-btn {
   text-align: center;
-  padding: 10rpx;
+  padding: 10rpx 20rpx;
   border: 1px solid #ccc;
   border-radius: 10rpx;
-  font-size: 24rpx;
+  font-size: 32rpx;
 }
 .note-btn.active {
   background: #e6f7ff;
@@ -1147,17 +1347,29 @@ function deleteSelectedNote() {
 }
 .musicConfig {
   width: 100%;
-  padding: 10px;
   box-sizing: border-box;
-  .section-title {
-    font-size: 14px;
-    font-weight: bold;
-    margin: 10px 0 5px 0;
-    color: #333;
+  .tablist{
+    width: 100%;
+    display: flex;
+    justify-content: space-between;
+    border-bottom: 1rpx solid #f5f5f5;
+    padding: 0 20rpx;
+    .item{
+      text-align: center;
+      font-size: 32rpx;
+      color: #303133;
+      line-height: 2;
+    }
+    .item.active{
+      color: #3c9cff;
+      font-weight: bold;
+      border-bottom: 1rpx solid #3c9cff;
+    }
   }
   .clef,
   .timeSignatureList,
   .keySignatureList {
+    margin: 20rpx 20rpx;
     display: flex;
     flex-wrap: wrap;
     gap: 10rpx;
@@ -1165,7 +1377,7 @@ function deleteSelectedNote() {
       padding: 6rpx 12rpx;
       border: 1px solid #ddd;
       border-radius: 8rpx;
-      font-size: 24rpx;
+      font-size: 32rpx;
       background: #fff;
       &.active {
         background: #1890ff;
@@ -1182,7 +1394,7 @@ function deleteSelectedNote() {
 .note_tools,.modifier-tools .tool-group{
   display: flex;
   padding:10rpx 20rpx;
-  font-size: 24rpx;
+  font-size: 32rpx;
   gap:20rpx;
   .item{
     padding: 4rpx 10rpx;
