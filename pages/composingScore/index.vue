@@ -22,6 +22,7 @@
     :src="selected.icon"
     mode="aspectFit"
   />
+     
   <!-- 音符工具栏 -->
   <view class="note_tools">
     <view class="item add" @click="addStave">新增一行</view>
@@ -29,6 +30,7 @@
     <view class="item delete" @click="deleteSelectedNote">删除音符</view>
     <view class="item delete" @click="resetScore">全部清空</view>
   </view>
+
   <view class="note-bar">
     <view
       v-for="d in durations"
@@ -121,7 +123,7 @@
 </template>
 
 <script setup>
-import { onMounted, getCurrentInstance, ref, computed, nextTick } from 'vue';
+import { onMounted, getCurrentInstance, ref, computed, nextTick,reactive } from 'vue';
 import Vex from 'vexflow';
 
 // --- 基础配置 ---
@@ -479,9 +481,9 @@ function onCanvasClick(e) {
                 };
                 selectedAccidental.value = info.accidental || null; //修饰符回显
                 isNoteDotted.value = rawNote.duration.indexOf('d') !== -1;//附点回显
-                console.log('选中音符详情：', selectedNoteInfo.value);
-                console.log('获取到的修饰符：', info.accidental); // 这里就是你要的 #, b
-                  console.log('回显 - 修饰符:', selectedAccidental.value, '附点:', isNoteDotted.value);
+                // console.log('选中音符详情：', selectedNoteInfo.value);
+                // console.log('获取到的修饰符：', info.accidental); // 这里就是你要的 #, b
+                //   console.log('回显 - 修饰符:', selectedAccidental.value, '附点:', isNoteDotted.value);
               }
             }
             // 找到点击音符数据========================================================
@@ -625,6 +627,9 @@ const touch = e.changedTouches[0];
 
   });
 }
+/**
+ * 插入音符到五线谱，并自动选中
+ */
 function insertNoteToStave(staveId, targetX, pitch, duration) {
   const stave = staveList.value.find((s) => s.id === staveId);
   if (!stave) return;
@@ -632,24 +637,54 @@ function insertNoteToStave(staveId, targetX, pitch, duration) {
   const notes = stave.notes;
   const visualMap = visualMaps[staveId] || [];
 
-  if (visualMap.length === 0) {
-    notes.push({ pitch, duration, id: Date.now() });
-    return;
-  }
+  // 1. 计算插入位置 (保持原有逻辑)
   let insertIndex = notes.length;
-  for (let i = 0; i < visualMap.length; i++) {
-    const visualNote = visualMap[i];
-    if (targetX < visualNote.x + 10) {
-      insertIndex = visualNote.rawIndex;
-      break;
+  if (visualMap.length > 0) {
+    for (let i = 0; i < visualMap.length; i++) {
+      const visualNote = visualMap[i];
+      if (targetX < visualNote.x + 10) {
+        insertIndex = visualNote.rawIndex;
+        break;
+      }
     }
   }
-  const newNote = { pitch, duration, id: Date.now() };
+  
+  // 边界检查
   if (insertIndex < 0) insertIndex = 0;
   if (insertIndex > notes.length) insertIndex = notes.length;
-  notes.splice(insertIndex, 0, newNote);
-}
 
+  // 2. 创建新音符
+  const newId = Date.now();
+  const newNote = { pitch, duration, id: newId };
+  
+  // 3. 插入数据
+  notes.splice(insertIndex, 0, newNote);
+
+  // ============================================================
+  // 【新增功能】自动选中新插入的音符 & 回显状态
+  // ============================================================
+  
+  // A. 设置选中ID
+  selectedNoteId.value = newId;
+
+  // B. 解析新音符的 Pitch 信息 (用于回显)
+  const info = parsePitch(pitch);
+  
+  // C. 更新详情对象
+  selectedNoteInfo.value = {
+    ...info,
+    pitch: pitch
+  };
+
+  // D. 回显修饰符状态 (例如拖拽生成的 pitch 可能是 "F#/4")
+  // 如果 info.accidental 是 "" (空字符串)，设为 null 以匹配工具栏逻辑
+  selectedAccidental.value = info.accidental || null;
+
+  // E. 回显附点状态
+  isNoteDotted.value = duration.indexOf('d') !== -1;
+
+  console.log('自动选中新音符:', pitch, 'ID:', newId);
+}
 /**
  * 核心算法：根据 Y 坐标 + 谱号 + 调号，计算出准确的音高
  * 修复：【新增限制】限制最大加线数量，防止拖拽到无穷远导致渲染崩溃
@@ -969,19 +1004,35 @@ function processNotesToMeasures(rawNotes, timeSignature = '4/4', clef = 'treble'
   // --- 3. 后处理：生成 Beam 和 Tie 对象 ---
   const beamableDurations = ['8', '16', '32', '64'];
   measures.forEach((m) => {
+    m.beams = [];
     // 处理 Beams
     let noteGroup = [];
     m.notes.forEach(note => {
         const durationKey = note.duration.replace(/[rd]/g, '');
         const isRest = note.duration.includes('r');
-        if (beamableDurations.includes(durationKey) && !isRest) {
-            noteGroup.push(note);
-        } else {
-            if (noteGroup.length > 1) m.beams.push(new VF.Beam(noteGroup));
-            noteGroup = [];
+        const isBeamable = beamableDurations.includes(durationKey) && !isRest;
+
+      if (isBeamable) {
+        noteGroup.push(note);
+      } else {
+        if (noteGroup.length > 1) {
+          // 【修改这里】：添加配置对象
+          const beams = VF.Beam.generateBeams(noteGroup, {
+            beam_rests: false,
+            beam_middle_only: false,
+            flat_beams: true // <--- 关键：强制水平符尾，解决"黑疙瘩"最有效的方法
+          });
+          m.beams.push(...beams);
         }
+        noteGroup = [];
+      }
     });
-    if (noteGroup.length > 1) m.beams.push(new VF.Beam(noteGroup));
+    if (noteGroup.length > 1) {
+       const beams = VF.Beam.generateBeams(noteGroup, {
+        flat_beams: true 
+      });
+      m.beams.push(...beams);
+    }
 
     // 处理 Ties (将简单的配置对象转换为 VexFlow StaveTie)
     // 我们需要把跨小节的连线单独处理
@@ -1382,17 +1433,22 @@ function resetScore() {
 }
 .note-bar {
   display: flex;
+  width: 100%;
+  // overflow-x: scroll;
   gap: 20rpx;
   padding: 10rpx 20rpx;
   flex-wrap: wrap;
+  .note-btn {
+    white-space: nowrap;
+    width: max-content;
+    text-align: center;
+    padding: 10rpx;
+    border: 1px solid #ccc;
+    border-radius: 10rpx;
+    font-size: 30rpx;
+  }
 }
-.note-btn {
-  text-align: center;
-  padding: 10rpx 20rpx;
-  border: 1px solid #ccc;
-  border-radius: 10rpx;
-  font-size: 32rpx;
-}
+
 .note-btn.active {
   background: #e6f7ff;
   border-color: #1890ff;
