@@ -296,7 +296,7 @@ function updateNoteAccidental(accValue) {
     let newAccSuffix = selectedAccidental.value;
 
     note.pitch = `${step}${newAccSuffix}/${octave}`;
-    console.log("新的音符音高", note.pitch);
+    // console.log("新的音符音高", note.pitch);
 
     // 重绘
     drawScore();
@@ -344,7 +344,7 @@ const onNoteBtnClick = (d) => {
 
     // 在该 Stave 中找到对应的音符数据
     const targetNote = stave.notes.find((n) => n.id === selectedNoteId.value);
-    console.log("notes", targetNote);
+    // console.log("notes", targetNote);
 
     if (targetNote) {
       // 3. 修改音符数据的时值
