@@ -1336,7 +1336,7 @@ function drawScore() {
         measure.notes.forEach((note) => {
           // 如果该音符的源ID 等于 当前选中的ID
           if (note.sourceNoteId && note.sourceNoteId === selectedNoteId.value) {
-            note.setStyle({ fillStyle: "#ff4d4f", strokeStyle: "#ff4d4f" }); // 红色高亮
+            note.setStyle({ fillStyle: "#1890ff", strokeStyle: "#1890ff" }); // 红色高亮
           } else {
             // 确保非选中音符恢复默认样式 (黑色)
             note.setStyle({ fillStyle: "black", strokeStyle: "black" });
