@@ -25,10 +25,11 @@
      
   <!-- 音符工具栏 -->
   <view class="note_tools">
-    <view class="item add" @click="addStave">新增一行</view>
-    <view class="item delete" @click="clearCurrentStaveNotes">清空当前行</view>
+    <view class="item add" @click="addStave">新增行</view>
+    <view class="item delete" @click="clearCurrentStaveNotes">清空行</view>
+    <view class="item delete" @click="deleteCurrentStave">删除行</view>
     <view class="item delete" @click="deleteSelectedNote">删除音符</view>
-    <view class="item delete" @click="resetScore">全部清空</view>
+    <view class="item delete" @click="resetScore">初始化</view>
   </view>
 
   <view class="note-bar">
@@ -1356,7 +1357,7 @@ function deleteSelectedNote() {
         // 回显附点
         isNoteDotted.value = lastNote.duration.indexOf('d') !== -1;
         
-        console.log('自动选中最后一个音符:', lastNote.pitch);
+        // console.log('自动选中最后一个音符:', lastNote.pitch);
 
       } else {
         // --- 情况 B：删完了，清空选中 ---
@@ -1431,6 +1432,64 @@ function resetScore() {
         
         // 5. 重绘
         drawScore();
+      }
+    }
+  });
+}
+/**
+ * 删除当前选中的乐谱行
+ */
+function deleteCurrentStave() {
+  // 1. 找到当前行在数组中的索引
+  const index = staveList.value.findIndex(s => s.id === activeStaveId.value);
+  
+  if (index === -1) return;
+
+  // 2. 安全保护：如果只剩最后一行，不允许删除
+  if (staveList.value.length <= 1) {
+    uni.showToast({
+      title: '至少保留一行乐谱，无法删除',
+      icon: 'none'
+    });
+    return;
+  }
+
+  // 3. 弹出确认框 (防止误删)
+  uni.showModal({
+    title: '删除当前行',
+    content: '确定要删除这一行乐谱吗？其中的音符将无法恢复。',
+    success: (res) => {
+      if (res.confirm) {
+        // --- 开始删除逻辑 ---
+
+        // 4. 从数组中移除
+        staveList.value.splice(index, 1);
+
+        // 5. 重新计算 activeStaveId (激活邻近的一行)
+        // 逻辑：如果删除的是第2行(index 1)，且总共3行 -> 剩下的 active 应该是原来的第1行 (index 0)
+        // 如果删除的是第1行(index 0) -> active 应该是新的第1行 (原来的 index 1)
+        // 简单算法：取 index - 1，如果小于 0 则取 0
+        const newIndex = Math.max(0, index - 1);
+        
+        // 确保数组里还有东西 (虽然上面做了length检查，这里双重保险)
+        if (staveList.value[newIndex]) {
+          activeStaveId.value = staveList.value[newIndex].id;
+        }
+
+        // 6. 清空所有选中状态 (音符、修饰符、附点等)
+        // 这一步很重要，否则可能会高亮一个不存在的音符ID
+        selectedNoteId.value = null;
+        selectedNoteInfo.value = { step: '', accidental: '', octave: '', pitch: '' };
+        selectedAccidental.value = null;
+        isNoteDotted.value = false;
+
+        // 7. 重绘乐谱
+        // 使用 nextTick 确保数据更新后再画，防止 activeStaveId 切换瞬间的闪烁或报错
+        nextTick(() => {
+          drawScore();
+        });
+        
+        uni.showToast({ title: '删除成功', icon: 'success' });
       }
     }
   });
