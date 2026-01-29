@@ -156,7 +156,7 @@ const activeStaveConfig = computed(() => {
   const stave = staveList.value.find((s) => s.id === activeStaveId.value);
   return stave ? stave.config : { clef: 'treble', keySignature: 'C', timeSignature: '4/4' };
 });
-const list = ref(['谱号', '调号', '拍号','修饰符']);  
+const list = ref(['谱号', '调号', '拍号','记号']);  
 const current = ref(1); 
 // --- 常量定义 ---
 const clefList = [
@@ -1318,8 +1318,10 @@ function drawScore() {
     cursorY += actualHeight;
   });
 }
+
 /**
  * 删除当前选中音符
+ * 逻辑：删除后，如果当前行还有音符，自动选中最后一个；否则清空选中
  */
 function deleteSelectedNote() {
   if (!selectedNoteId.value) return;
@@ -1328,8 +1330,45 @@ function deleteSelectedNote() {
   if (stave) {
     const idx = stave.notes.findIndex(n => n.id === selectedNoteId.value);
     if (idx > -1) {
+      // 1. 执行删除
       stave.notes.splice(idx, 1);
-      selectedNoteId.value = null; // 清空选中
+
+      // 2. 判断剩余情况
+      if (stave.notes.length > 0) {
+        // --- 情况 A：还有音符，选中最后一个 ---
+        const lastNote = stave.notes[stave.notes.length - 1];
+        
+        // A1. 更新选中 ID
+        selectedNoteId.value = lastNote.id;
+
+        // A2. 【关键】同步更新 UI 回显状态 (修饰符、附点等)
+        // 否则音符红了，但下面的按钮状态还是上一个被删音符的
+        const info = parsePitch(lastNote.pitch);
+        
+        selectedNoteInfo.value = {
+          ...info,
+          pitch: lastNote.pitch
+        };
+        
+        // 回显修饰符 (空字符串转为 null 以匹配你的 selectedAccidental 逻辑)
+        selectedAccidental.value = info.accidental || null;
+        
+        // 回显附点
+        isNoteDotted.value = lastNote.duration.indexOf('d') !== -1;
+        
+        console.log('自动选中最后一个音符:', lastNote.pitch);
+
+      } else {
+        // --- 情况 B：删完了，清空选中 ---
+        selectedNoteId.value = null;
+        
+        // 重置 UI 状态
+        selectedNoteInfo.value = { step: '', accidental: '', octave: '', pitch: '' };
+        selectedAccidental.value = null;
+        isNoteDotted.value = false;
+      }
+
+      // 3. 重绘
       drawScore();
     }
   }
