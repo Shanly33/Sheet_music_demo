@@ -24,9 +24,10 @@
   />
   <!-- 音符工具栏 -->
   <view class="note_tools">
-    <!-- <view class="item add" @click="addStave">新增一行</view> -->
+    <view class="item add" @click="addStave">新增一行</view>
+    <view class="item delete" @click="clearCurrentStaveNotes">清空当前行</view>
     <view class="item delete" @click="deleteSelectedNote">删除音符</view>
-    <view class="item delete" @click="deleteSelectedNote">全部清空</view>
+    <view class="item delete" @click="resetScore">全部清空</view>
   </view>
   <view class="note-bar">
     <view
@@ -1281,6 +1282,68 @@ function deleteSelectedNote() {
       drawScore();
     }
   }
+}
+/**
+ * 辅助函数：重置选中状态
+ * 清空当前的音符选中ID、修饰符回显、附点回显等
+ */
+function resetSelectionState() {
+  selectedNoteId.value = null;
+  selectedNoteInfo.value = { step: '', accidental: '', octave: '', pitch: '' };
+  selectedAccidental.value = null;
+  isNoteDotted.value = false;
+}
+
+/**
+ * 方法一：清空当前选中行的所有音符
+ * 只操作 activeStaveId 对应的那一行，保留谱号/调号/拍号配置
+ */
+function clearCurrentStaveNotes() {
+  const stave = staveList.value.find(s => s.id === activeStaveId.value);
+  if (stave) {
+    // 1. 清空音符数组
+    stave.notes = [];
+    
+    // 2. 重置选中状态（防止删除后还保留着选中高亮）
+    resetSelectionState();
+
+    // 3. 重绘
+    drawScore();
+    
+    // 提示反馈 (可选)
+    uni.showToast({ title: '当前行已清空', icon: 'none' });
+  }
+}
+
+/**
+ * 方法二：清空整个乐谱回到初始化
+ * 删除所有行，只保留一行默认状态，重置所有配置
+ */
+function resetScore() {
+  // double check 防止误触
+  uni.showModal({
+    title: '确认清空',
+    content: '确定要清空所有乐谱内容回到初始状态吗？此操作不可恢复。',
+    success: (res) => {
+      if (res.confirm) {
+        // 1. 生成一个新的 ID
+        const newId = Date.now();
+        
+        // 2. 重置 staveList 为包含一个默认 Stave 的数组
+        // createDefaultStave 是你代码里已有的函数
+        staveList.value = [createDefaultStave(newId)];
+        
+        // 3. 重置当前激活 ID
+        activeStaveId.value = newId;
+        
+        // 4. 重置选中状态
+        resetSelectionState();
+        
+        // 5. 重绘
+        drawScore();
+      }
+    }
+  });
 }
 </script>
 
