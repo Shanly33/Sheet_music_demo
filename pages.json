@@ -1,6 +1,12 @@
 {
   "pages": [
     {
+      "path": "pages/piano/index",
+      "style": {
+        "navigationBarTitleText": "钢琴谱"
+      }
+    },
+    {
       "path": "pages/diyDemo/index",
       "style": {
         "navigationBarTitleText": "自定义",
@@ -13,7 +19,6 @@
         "navigationBarTitleText": "渲染"
       }
     },
-    //pages数组中第一项表示应用启动页，参考：https://uniapp.dcloud.io/collocation/pages
     {
       "path": "pages/demo2/index",
       "style": {
@@ -36,7 +41,11 @@
       },
       {
         "pagePath": "pages/composingScore/index",
-        "text": "渲染2"
+        "text": "五线谱"
+      },
+      {
+        "pagePath": "pages/piano/index",
+        "text": "钢琴谱"
       }
     ]
   },

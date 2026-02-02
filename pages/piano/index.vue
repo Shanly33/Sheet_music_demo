@@ -15,14 +15,6 @@
     </view>
   </scroll-view>
 
-  <image
-    v-if="isDragging"
-    class="drag-ghost"
-    :style="ghostStyle"
-    :src="selected.icon"
-    mode="aspectFit"
-  />
-
   <!-- 音符工具栏 -->
   <view class="note_tools">
     <view class="item add" @click="addStave">新增行</view>
@@ -30,24 +22,7 @@
     <view class="item delete" @click="deleteCurrentStave">删除行</view>
     <view class="item delete" @click="deleteSelectedNote">删除音符</view>
     <view class="item delete" @click="resetScore">初始化</view>
-    <view class="item save" @click="exportMidiFile">
-      导出MIDI
-    </view>
-  </view>
-
-  <view class="note-bar">
-    <view
-      v-for="d in durations"
-      :key="d.id"
-      class="note-btn"
-      :class="{ active: selected?.id === d.id }"
-      @touchstart.stop="(e) => onDragStart(e, d)"
-      @touchmove.stop="onDragMove"
-      @touchend.stop="onDragEnd"
-    >
-      <!-- <image class="note-icon" v-if="d.icon" :src="d.icon" mode="aspectFit" /> -->
-      <view class="note-label">{{ d.label }}</view>
-    </view>
+    <view class="item save" @click="exportMidiFile"> 导出MIDI </view>
   </view>
 
   <view class="tools">
@@ -129,6 +104,19 @@
       </view>
     </view>
   </view>
+  <view class="note-bar">
+    <view
+      v-for="d in durations"
+      :key="d.id"
+      class="note-btn"
+      :class="{ active: selected?.id === d.id }"
+      @click.stop="selected = d"
+    >
+      <!-- <image class="note-icon" v-if="d.icon" :src="d.icon" mode="aspectFit" /> -->
+      <view class="note-label">{{ d.label }}</view>
+    </view>
+  </view>
+  <PianoKeyboard @play="playNote" />
 </template>
 
 <script setup>
@@ -141,13 +129,11 @@ import {
   reactive,
 } from "vue";
 import Vex from "vexflow";
-import MidiWriter from 'midi-writer-js';
-
+import MidiWriter from "midi-writer-js";
+import PianoKeyboard from "@/components/PianoKeyboard/PianoKeyboard.vue";
+import { pianoKeyToVexFlow } from "./vexHelper";
 // --- 基础配置 ---
 const instance = getCurrentInstance();
-const isDragging = ref(false);
-const dragPoint = ref({ x: 0, y: 0 });
-const ghostStyle = ref("");
 const scoreWidth = ref(400);
 let canvasNode = null;
 let globalCtx = null;
@@ -278,16 +264,15 @@ function parsePitch(pitchStr) {
 
 /**
  * 修改当前选中音符的修饰符
- * @param {String} accValue  修饰符值: '#', 'b', 'n', '##', 'bb' 
+ * @param {String} accValue  修饰符值: '#', 'b', 'n', '##', 'bb'
  */
-function updateNoteAccidental(accValue) {  
+function updateNoteAccidental(accValue) {
   // 2. 如果没有选中音符，则直接返回（或者你可以设计为设置“默认修饰符”）
   if (!selectedNoteId.value) return;
 
   // 1. 更新 UI 选中状态
   selectedAccidental.value =
     accValue === selectedAccidental.value ? "" : accValue;
-
 
   // 3. 查找并修改数据
   const stave = staveList.value.find((s) => s.id === activeStaveId.value);
@@ -578,142 +563,36 @@ function onCanvasClick(e) {
     drawScore();
   });
 }
-// 【新增】用于区分点击和拖拽的临时变量
-const dragStartPoint = { x: 0, y: 0 };
-const dragThreshold = 5; // 移动超过5px才算拖拽
-function onDragStart(e, d) {
-  const touch = e.touches ? e.touches[0] : e.changedTouches[0];
-  dragStartPoint.x = touch.pageX;
-  dragStartPoint.y = touch.pageY;
-  selected.value = d;
-  isDragging.value = false;
-  updateGhost(e);
-}
-function onDragMove(e) {
-  const touch = e.touches ? e.touches[0] : e.changedTouches[0];
-  if (!touch) return;
 
-  // 2. 计算移动距离
-  const deltaX = Math.abs(touch.pageX - dragStartPoint.x);
-  const deltaY = Math.abs(touch.pageY - dragStartPoint.y);
 
-  // 3. 只有移动距离超过阈值，才正式激活“拖拽模式”
-  if (!isDragging.value && (deltaX > dragThreshold || deltaY > dragThreshold)) {
-    isDragging.value = true;
+/**
+ * 添加音符，如果有选中的音符，就在选中音符后插入，没有就在当前行末尾插入音符
+ */
+const createNote = (pitch) => {
+
+  let targetStaveId = parseInt(activeStaveId.value);
+  let targetLayout = layoutMaps[activeStaveId.value];
+  const staveObj = staveList.value.find((s) => s.id === activeStaveId.value);
+  if (staveObj) {
+    // 注意：这里用 targetLayout.y (五线谱线的起始Y) 来创建临时 Stave
+    const tempStave = new VF.Stave(0, targetLayout.y, 400);
+    tempStave.addClef(staveObj.config.clef || "treble");
+    insertNoteToStave(targetStaveId, pitch, selected.value.duration);
+    drawScore();
   }
-
-  // 4. 如果是拖拽模式，更新幽灵图标位置
-  if (isDragging.value) {
-    updateGhost(e);
-  }
-}
-function updateGhost(e) {
-  const touch = e.touches ? e.touches[0] : e.changedTouches[0];
-  if (touch) {
-    dragPoint.value = { x: touch.pageX, y: touch.pageY };
-    ghostStyle.value = `left:${touch.pageX - 20}px;top:${touch.pageY - 40}px;`;
-  }
-}
-
-function onDragEnd(e) {
-  if (!isDragging.value) {
-    if (selected.value) onNoteBtnClick(selected.value);
-  } else {
-    handleDrop(e);
-  }
-  isDragging.value = false;
-  ghostStyle.value = "";
-}
-// 音符拖拽落点
-function handleDrop(e) {
-  const touch = e.changedTouches[0];
-  const rectQuery = uni
-    .createSelectorQuery()
-    .in(instance.proxy)
-    .select("#scoreCanvas")
-    .boundingClientRect();
-
-  rectQuery.exec((res) => {
-    if (!res[0]) {
-      isDragging.value = false;
-      return;
-    }
-    const rect = res[0];
-    const x = touch.pageX - rect.left;
-    const y = touch.pageY - rect.top;
-
-    if (x >= 0 && x <= rect.width && y >= 0 && y <= rect.height) {
-      let targetStaveId = null;
-      let targetLayout = null;
-
-      // 1. 严格判定：手指落在哪个“蓝色区域”内
-      for (let id in layoutMaps) {
-        const layout = layoutMaps[id];
-        // 直接使用 drawScore 里记录的 top 和 bottom
-        if (y >= layout.top && y <= layout.bottom) {
-          targetStaveId = parseInt(id);
-          targetLayout = layout;
-          break;
-        }
-      }
-
-      // 2. 兜底逻辑（可选）：如果正好点在两个区域的缝隙（虽然现在应该没有缝隙），或者点在最下方空白处
-      // 如果你希望点在空白处自动吸附到最后一行，可以保留下面的逻辑，否则可以删除
-      if (!targetStaveId) {
-        // 寻找距离最近的行作为备选（防止拖出边界无效）
-        let minDistance = Infinity;
-        for (let id in layoutMaps) {
-          const layout = layoutMaps[id];
-          const center = layout.top + (layout.bottom - layout.top) / 2;
-          const dist = Math.abs(y - center);
-          if (dist < minDistance && dist < 200) {
-            // 200px 范围内吸附
-            minDistance = dist;
-            targetStaveId = parseInt(id);
-            targetLayout = layout;
-          }
-        }
-      }
-
-      if (targetStaveId) {
-        activeStaveId.value = targetStaveId;
-        const staveObj = staveList.value.find((s) => s.id === targetStaveId);
-
-        if (staveObj) {
-          // 注意：这里用 targetLayout.y (五线谱线的起始Y) 来创建临时 Stave
-          const tempStave = new VF.Stave(0, targetLayout.y, 400);
-          tempStave.addClef(staveObj.config.clef || "treble");
-
-          const pitch = calculatePitchFromY(y, tempStave, staveObj.config);
-          insertNoteToStave(targetStaveId, x, pitch, selected.value.duration);
-          drawScore();
-        }
-      }
-    }
-  });
-}
+};
 /**
  * 插入音符到五线谱，并自动选中
  */
-function insertNoteToStave(staveId, targetX, pitch, duration) {
+function insertNoteToStave(staveId, pitch, duration) {
   const stave = staveList.value.find((s) => s.id === staveId);
   if (!stave) return;
 
   const notes = stave.notes;
-  const visualMap = visualMaps[staveId] || [];
-
+  
   // 1. 计算插入位置 (保持原有逻辑)
-  let insertIndex = notes.length;
-  if (visualMap.length > 0) {
-    for (let i = 0; i < visualMap.length; i++) {
-      const visualNote = visualMap[i];
-      if (targetX < visualNote.x + 10) {
-        insertIndex = visualNote.rawIndex;
-        break;
-      }
-    }
-  }
-
+  let insertIndex = selectedNoteId.value?notes.findIndex(item=>item.id===selectedNoteId.value)+1:notes.length;
+  
   // 边界检查
   if (insertIndex < 0) insertIndex = 0;
   if (insertIndex > notes.length) insertIndex = notes.length;
@@ -722,7 +601,6 @@ function insertNoteToStave(staveId, targetX, pitch, duration) {
   const newId = Date.now();
   const newNote = { pitch, duration, id: newId };
 console.log("222index",insertIndex);
-
   // 3. 插入数据
   notes.splice(insertIndex, 0, newNote);
 
@@ -751,78 +629,7 @@ console.log("222index",insertIndex);
 
   // console.log("自动选中新音符:", pitch, "ID:", newId);
 }
-/**
- * 核心算法：根据 Y 坐标 + 谱号 + 调号，计算出准确的音高
- * 修复：【新增限制】限制最大加线数量，防止拖拽到无穷远导致渲染崩溃
- */
-function calculatePitchFromY(y, stave, config) {
-  const { clef, keySignature } = config;
 
-  // 1. 获取五线谱 Line (原始值)
-  let line = stave.getLineForY(y);
-
-  // ======================================================
-  // 【新增限制】: 限制加线数量 (Clamping)
-  // ======================================================
-  const MAX_LEDGER_LINES = 5; // 允许最大加线数 (5条)
-
-  // 顶线是 0，往上是负数。限制为 -5
-  const TOP_LIMIT = 0 - MAX_LEDGER_LINES;
-  // 底线是 4，往下是正数。限制为 4 + 5 = 9
-  const BOTTOM_LIMIT = 4 + MAX_LEDGER_LINES;
-
-  // 强制修正 line 的范围
-  if (line < TOP_LIMIT) line = TOP_LIMIT;
-  if (line > BOTTOM_LIMIT) line = BOTTOM_LIMIT;
-  // ======================================================
-
-  // 2. 确定基准音
-  let bottomLineNote = { step: "E", octave: 4 }; // Treble
-  if (clef === "bass") bottomLineNote = { step: "G", octave: 2 };
-  if (clef === "alto") bottomLineNote = { step: "F", octave: 3 };
-  if (clef === "tenor") bottomLineNote = { step: "D", octave: 3 };
-
-  const noteNames = ["C", "D", "E", "F", "G", "A", "B"];
-  const bottomLineIndex =
-    bottomLineNote.octave * 7 + noteNames.indexOf(bottomLineNote.step);
-
-  // 使用限制后的 line 计算步数
-  const visualSteps = Math.round((4 - line) * 2);
-  const targetIndex = bottomLineIndex + visualSteps;
-
-  const octave = Math.floor(targetIndex / 7);
-  const stepIndex = targetIndex % 7;
-  const safeStepIndex = stepIndex < 0 ? 7 + stepIndex : stepIndex;
-  const noteName = noteNames[safeStepIndex];
-
-  // 3. 调号处理
-  const KEY_DATA = {
-    C: { type: "", notes: [] },
-    G: { type: "#", notes: ["F"] },
-    D: { type: "#", notes: ["F", "C"] },
-    A: { type: "#", notes: ["F", "C", "G"] },
-    E: { type: "#", notes: ["F", "C", "G", "D"] },
-    B: { type: "#", notes: ["F", "C", "G", "D", "A"] },
-    "F#": { type: "#", notes: ["F", "C", "G", "D", "A", "E"] },
-    "C#": { type: "#", notes: ["F", "C", "G", "D", "A", "E", "B"] },
-    F: { type: "b", notes: ["B"] },
-    Bb: { type: "b", notes: ["B", "E"] },
-    Eb: { type: "b", notes: ["B", "E", "A"] },
-    Ab: { type: "b", notes: ["B", "E", "A", "D"] },
-    Db: { type: "b", notes: ["B", "E", "A", "D", "G"] },
-    Gb: { type: "b", notes: ["B", "E", "A", "D", "G", "C"] },
-    Cb: { type: "b", notes: ["B", "E", "A", "D", "G", "C", "F"] },
-  };
-
-  const currentKeyData = KEY_DATA[keySignature] || KEY_DATA["C"];
-  let acc = "";
-
-  if (currentKeyData.notes.includes(noteName)) {
-    acc = currentKeyData.type;
-  }
-
-  return `${noteName}${acc}/${octave}`;
-}
 
 // ============================================================
 // 数据处理逻辑 (支持动态拍号 + 动态谱号)
@@ -1613,29 +1420,29 @@ function getMidiKeySignature(keySpec) {
   // 正数 = 升号数 (#)
   // 负数 = 降号数 (b)
   const map = {
-    'C':  0,
-    'G':  1,  // 1个升号
-    'D':  2,
-    'A':  3,
-    'E':  4,
-    'B':  5,
-    'F#': 6,
-    'C#': 7,
-    'F': -1,  // 1个降号
-    'Bb': -2,
-    'Eb': -3,
-    'Ab': -4,
-    'Db': -5,
-    'Gb': -6,
-    'Cb': -7
+    C: 0,
+    G: 1, // 1个升号
+    D: 2,
+    A: 3,
+    E: 4,
+    B: 5,
+    "F#": 6,
+    "C#": 7,
+    F: -1, // 1个降号
+    Bb: -2,
+    Eb: -3,
+    Ab: -4,
+    Db: -5,
+    Gb: -6,
+    Cb: -7,
   };
 
   // 默认为 C 大调 (0)
   const sf = map[keySpec] !== undefined ? map[keySpec] : 0;
-  
+
   // 目前你的编辑器只有大调，所以 mi 固定为 0
   // 如果以后支持小调 (如 'Am'), 需要额外逻辑判断
-  const mi = 0; 
+  const mi = 0;
 
   return [sf, mi];
 }
@@ -1645,38 +1452,38 @@ function getMidiKeySignature(keySpec) {
  * 例如：'hd' (附点二分) -> ['2', '4'] (即 2分 + 4分)
  */
 function getMidiDuration(vexDuration) {
-  if (!vexDuration) return '4';
+  if (!vexDuration) return "4";
 
   // 1. 判断是否有附点
-  const isDotted = vexDuration.includes('d');
-  
+  const isDotted = vexDuration.includes("d");
+
   // 2. 获取基础时值键 (去除 r 和 d)
-  const cleanKey = vexDuration.replace(/[rd]/g, '').trim();
+  const cleanKey = vexDuration.replace(/[rd]/g, "").trim();
 
   // 3. 基础映射表 (VexFlow -> MidiWriter String)
   const baseMap = {
-    'w': '1',   // 全音符
-    'h': '2',   // 二分
-    'q': '4',   // 四分
-    '8': '8',   // 八分
-    '16': '16',
-    '32': '32',
-    '64': '64'
+    w: "1", // 全音符
+    h: "2", // 二分
+    q: "4", // 四分
+    8: "8", // 八分
+    16: "16",
+    32: "32",
+    64: "64",
   };
 
   // 4. 附点增量映射表 (当前音符 -> 附点代表的时值)
   // 逻辑：附点代表时值的一半
   const dotMap = {
-    '1': '2',   // 全音符的附点是二分
-    '2': '4',   // 二分音符的附点是四分
-    '4': '8',   // 四分音符的附点是八分
-    '8': '16',  // 八分音符的附点是十六分
-    '16': '32',
-    '32': '64',
-    '64': '64'  // 兜底，极短音符忽略
+    1: "2", // 全音符的附点是二分
+    2: "4", // 二分音符的附点是四分
+    4: "8", // 四分音符的附点是八分
+    8: "16", // 八分音符的附点是十六分
+    16: "32",
+    32: "64",
+    64: "64", // 兜底，极短音符忽略
   };
 
-  const baseMidi = baseMap[cleanKey] || '4';
+  const baseMidi = baseMap[cleanKey] || "4";
 
   // 5. 【核心修复】如果是附点，返回数组 ['2', '4']
   if (isDotted) {
@@ -1696,16 +1503,16 @@ function getMidiDuration(vexDuration) {
  */
 function getMidiPitch(vexPitch) {
   if (!vexPitch) return [];
-  
-  // 分割音名和八度
-  const parts = vexPitch.split('/');
-  if (parts.length < 2) return ['C4']; // 兜底
 
-  let key = parts[0]; 
+  // 分割音名和八度
+  const parts = vexPitch.split("/");
+  if (parts.length < 2) return ["C4"]; // 兜底
+
+  let key = parts[0];
   const octave = parts[1];
 
   // 移除还原号 'n' (MIDI 不需要显式还原，G4 本身就是自然音)
-  key = key.replace('n', '');
+  key = key.replace("n", "");
 
   return [key + octave];
 }
@@ -1715,8 +1522,8 @@ function getMidiPitch(vexPitch) {
  */
 function exportMidiFile() {
   if (!staveList.value || staveList.value.length === 0) return;
-  console.log("staveList.value",);
-  
+  console.log("staveList.value");
+
   try {
     // 1. 创建一个新的 Track
     const track = new MidiWriter.Track();
@@ -1726,16 +1533,16 @@ function exportMidiFile() {
 
     // 3. 获取第一行的配置作为全局配置
     const firstConfig = staveList.value[0].config;
-    
+
     // 设置拍号
-    const [num, den] = (firstConfig.timeSignature || '4/4').split('/');
+    const [num, den] = (firstConfig.timeSignature || "4/4").split("/");
     track.setTimeSignature(parseInt(num), parseInt(den));
     // ============================================================
     // 【新增】3. 设置调号 (Key Signature)
     // ============================================================
-    const currentKey = firstConfig.keySignature || 'C';
+    const currentKey = firstConfig.keySignature || "C";
     const [sf, mi] = getMidiKeySignature(currentKey);
-    
+
     // midi-writer-js 支持 setKeySignature(sf, mi)
     track.setKeySignature(sf, mi);
     // ===========================================================
@@ -1745,29 +1552,33 @@ function exportMidiFile() {
     // 4. 遍历所有行，将音符写入 Track
     staveList.value.forEach((stave) => {
       stave.notes.forEach((note) => {
-      // 1. 调用修复后的函数，直接拿到如 '2d' 或 '4' 的字符串
+        // 1. 调用修复后的函数，直接拿到如 '2d' 或 '4' 的字符串
         const midiDurationStr = getMidiDuration(note.duration);
-        
-        const isRest = note.duration.includes('r');
-console.log("midiDurationStr",midiDurationStr);
+
+        const isRest = note.duration.includes("r");
+        console.log("midiDurationStr", midiDurationStr);
 
         if (isRest) {
           // 休止符
-          track.addEvent(new MidiWriter.NoteEvent({
-            pitch: null, 
-            duration: midiDurationStr, // 直接传入 '2d'
-            wait: 0 
-            // 注意：这里删掉了 dots 属性，因为已经在 duration 字符串里了
-          }));
+          track.addEvent(
+            new MidiWriter.NoteEvent({
+              pitch: null,
+              duration: midiDurationStr, // 直接传入 '2d'
+              wait: 0,
+              // 注意：这里删掉了 dots 属性，因为已经在 duration 字符串里了
+            })
+          );
         } else {
           // 普通音符
           const midiPitch = getMidiPitch(note.pitch);
-          track.addEvent(new MidiWriter.NoteEvent({
-            pitch: midiPitch,
-            duration: midiDurationStr, // 直接传入 '2d'
-            velocity: 85
-            // 注意：这里删掉了 dots 属性
-          }));
+          track.addEvent(
+            new MidiWriter.NoteEvent({
+              pitch: midiPitch,
+              duration: midiDurationStr, // 直接传入 '2d'
+              velocity: 85,
+              // 注意：这里删掉了 dots 属性
+            })
+          );
         }
       });
     });
@@ -1775,7 +1586,7 @@ console.log("midiDurationStr",midiDurationStr);
     // 5. 生成文件数据
     // 【修正这里】：直接传入数组，不要写 tracks = ...
     const writer = new MidiWriter.Writer([track]);
-    
+
     // 6. 调用保存逻辑
     // #ifdef H5
     saveMidiWeb(writer);
@@ -1784,10 +1595,9 @@ console.log("midiDurationStr",midiDurationStr);
     // #ifdef MP-WEIXIN || APP-PLUS
     saveMidiMiniProgram(writer);
     // #endif
-
   } catch (error) {
     console.error("MIDI导出异常:", error);
-    uni.showToast({ title: '导出出错: ' + error.message, icon: 'none' });
+    uni.showToast({ title: "导出出错: " + error.message, icon: "none" });
   }
 }
 // --- H5 / Web 端下载逻辑 ---
@@ -1796,28 +1606,26 @@ function saveMidiWeb(writer) {
     // 【关键修复】
     // 1. 获取原始数据
     const midiData = writer.buildFile();
-    
+
     // 2. 创建 Blob 对象 (MIME type: audio/midi)
-    const blob = new Blob([midiData], { type: 'audio/midi' });
-    
+    const blob = new Blob([midiData], { type: "audio/midi" });
+
     // 3. 创建下载链接
     const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
+    const link = document.createElement("a");
     link.href = url;
     link.download = `score_${Date.now()}.mid`;
     document.body.appendChild(link);
     link.click();
-    
+
     // 清理
     document.body.removeChild(link);
     URL.revokeObjectURL(url);
-    
   } catch (e) {
-    console.error('H5导出失败', e);
-    alert('导出失败');
+    console.error("H5导出失败", e);
+    alert("导出失败");
   }
 }
-
 
 // --- 小程序 / App 端保存逻辑 ---
 function saveMidiMiniProgram(writer) {
@@ -1835,72 +1643,94 @@ function saveMidiMiniProgram(writer) {
     fs.writeFile({
       filePath: fileName,
       data: base64Str,
-      encoding: 'base64',
+      encoding: "base64",
       success: () => {
-        console.log('MIDI 文件已写入沙箱:', fileName);
+        console.log("MIDI 文件已写入沙箱:", fileName);
 
         // 4. 弹出操作菜单，让用户选择如何保存
         uni.showActionSheet({
-          itemList: ['打开预览 (可另存为)', '发送给朋友 (保存到聊天)'],
+          itemList: ["打开预览 (可另存为)", "发送给朋友 (保存到聊天)"],
           success: function (res) {
             // --- 选项 A: 打开预览 ---
             if (res.tapIndex === 0) {
               uni.openDocument({
                 filePath: fileName,
                 showMenu: true, // 关键：允许右上角显示菜单
-                fileType: 'mid', // 显式指定类型，防止安卓无法识别
+                fileType: "mid", // 显式指定类型，防止安卓无法识别
                 success: function () {
-                  console.log('文件打开成功');
+                  console.log("文件打开成功");
                 },
                 fail: function (err) {
                   // 安卓有时候打不开 .mid，提示用户用第二种方式
                   uni.showModal({
-                    title: '预览失败',
-                    content: '当前设备不支持直接预览 MIDI，请尝试“发送给朋友”来保存文件。',
-                    showCancel: false
+                    title: "预览失败",
+                    content:
+                      "当前设备不支持直接预览 MIDI，请尝试“发送给朋友”来保存文件。",
+                    showCancel: false,
                   });
-                }
+                },
               });
-            } 
+            }
             // --- 选项 B: 发送给朋友 (推荐) ---
             else if (res.tapIndex === 1) {
               // #ifdef MP-WEIXIN
               uni.shareFileMessage({
                 filePath: fileName,
-                fileName: 'my_score.mid', // 聊天窗口显示的文件名
+                fileName: "my_score.mid", // 聊天窗口显示的文件名
                 success: () => {
-                  console.log('分享成功');
+                  console.log("分享成功");
                 },
                 fail: (err) => {
-                  console.error('分享失败', err);
+                  console.error("分享失败", err);
                   // 如果用户取消了分享，通常不提示错误
-                  if (err.errMsg.indexOf('cancel') === -1) {
-                    uni.showToast({ title: '发送失败', icon: 'none' });
+                  if (err.errMsg.indexOf("cancel") === -1) {
+                    uni.showToast({ title: "发送失败", icon: "none" });
                   }
-                }
+                },
               });
               // #endif
 
               // #ifndef MP-WEIXIN
-              uni.showToast({ title: '当前环境不支持直接分享文件', icon: 'none' });
+              uni.showToast({
+                title: "当前环境不支持直接分享文件",
+                icon: "none",
+              });
               // #endif
             }
           },
           fail: function (res) {
             console.log(res.errMsg);
-          }
+          },
         });
       },
       fail: (err) => {
-        console.error('写入文件失败', err);
-        uni.showToast({ title: '导出失败: ' + err.errMsg, icon: 'none' });
-      }
+        console.error("写入文件失败", err);
+        uni.showToast({ title: "导出失败: " + err.errMsg, icon: "none" });
+      },
     });
   } catch (e) {
-    console.error('构建MIDI数据失败', e);
-    uni.showToast({ title: '生成MIDI失败', icon: 'none' });
+    console.error("构建MIDI数据失败", e);
+    uni.showToast({ title: "生成MIDI失败", icon: "none" });
   }
 }
+// 当前钢琴按键
+const currentNote = ref("--");
+// 播放逻辑
+const playNote = (note) => {
+  currentNote.value = note;
+  // 在小程序中建议使用 uni.createInnerAudioContext 播放声音
+  // const innerAudioContext = uni.createInnerAudioContext();
+  // innerAudioContext.src = `/static/piano-sounds/${note}.mp3`; // 需准备对应音效文件
+  // innerAudioContext.play();
+
+  // // 播放完毕销毁防止内存泄漏
+  // innerAudioContext.onEnded(() => {
+  //   innerAudioContext.destroy();
+  // });
+  const noteData = pianoKeyToVexFlow(note);
+  console.log("note", noteData, note);
+  createNote(noteData.key)
+};
 </script>
 
 <style scoped lang="scss">
@@ -1943,6 +1773,7 @@ function saveMidiMiniProgram(writer) {
   gap: 20rpx;
   padding: 10rpx 20rpx;
   flex-wrap: wrap;
+  justify-content: space-between;
   .note-btn {
     white-space: nowrap;
     width: max-content;
@@ -2012,7 +1843,7 @@ function saveMidiMiniProgram(writer) {
   }
 }
 .tools {
-  height: 30vh;
+  height: 17vh;
   overflow-y: auto;
 }
 .note_tools,
