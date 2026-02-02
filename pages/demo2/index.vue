@@ -369,7 +369,8 @@ async function onSelectMidi() {
   try {
     const midi = await selectAndParseMidi();
     midiJson.value = midi;
-
+    console.log("midi",midi,JSON.stringify(midi));
+    
     // ✅ 这里才生成 scoreModel
     const scoreModel = midiJsonToScoreModel(midi, {
       // 你想传的 options 都在这里
@@ -453,26 +454,30 @@ function getMinVoiceWidth(m, staffId, i) {
   const StaveNote = VF.StaveNote;
   const Voice = VF.Voice;
   const Formatter = VF.Formatter;
-  if (!voiceModel) return;
+
+  if (!voiceModel) return 0; // 没数据返回0
 
   // 检查小节是否为空（仅包含休止符）
   const hasNotes = voiceModel.events.some((ev) => ev.type !== "rest");
-
-  // 如果小节只有休止符，则跳过渲染
   if (!hasNotes) return 0;
+
   const tickables = [];
+
   for (const ev of voiceModel.events) {
+    // 1. 处理休止符
     if (ev.type === "rest") {
       tickables.push(
         new StaveNote({
           clef: staffId === "bass" ? "bass" : "treble",
-          keys: ["b/4"], // 占位 key
+          keys: ["b/4"],
           duration: ev.vf.duration,
           dots: ev.vf.dots || 0,
         })
       );
+      continue; // ✅ 必须加 continue，否则下面还会再加一次
     }
 
+    // 2. 处理普通音符
     const note = new StaveNote({
       clef: staffId === "bass" ? "bass" : "treble",
       keys: ev.vf.keys,
@@ -480,27 +485,30 @@ function getMinVoiceWidth(m, staffId, i) {
       dots: ev.vf.dots || 0,
     });
 
-    // 添加附点
     applyDots(note, ev.vf.dots);
-
     tickables.push(note);
-    // if (ev.id) eventNoteMap.set(ev.id, note);
   }
 
   // 3) Voice + 排版
   const vfVoice = new Voice({
     num_beats: m.timeSignature[0],
     beat_value: m.timeSignature[1],
-  }).addTickables(tickables);
+  });
+
+  // ✅ 关键：关闭严格模式，防止因为 MIDI 精度问题导致计算宽度时报错
+  vfVoice.setStrict(false);
+
+  // 添加音符
+  vfVoice.addTickables(tickables);
 
   const formatter = new Formatter().joinVoices([vfVoice]);
   formatter.preCalculateMinTotalWidth([vfVoice]);
-  // console.log("每个小节宽度", formatter.getMinTotalWidth());
+
   let setcionWidth = formatter.getMinTotalWidth();
-  // 第一小节加上表头100
+
   if (i === 0) setcionWidth += 100;
-  // 其他小节加上音符20左右间距
   setcionWidth += 20;
+
   return setcionWidth > 100 ? setcionWidth : 100;
 }
 
@@ -568,6 +576,7 @@ function layoutWidthsObject(widthMap, lineWidth, indent = 60) {
   padding: 32rpx;
   box-sizing: border-box;
 }
+
 .status {
   margin-top: 24rpx;
   color: #666;

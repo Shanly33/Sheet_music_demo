@@ -30,6 +30,9 @@
     <view class="item delete" @click="deleteCurrentStave">删除行</view>
     <view class="item delete" @click="deleteSelectedNote">删除音符</view>
     <view class="item delete" @click="resetScore">初始化</view>
+    <view class="item save" @click="exportMidiFile">
+      导出MIDI
+    </view>
   </view>
 
   <view class="note-bar">
@@ -138,6 +141,7 @@ import {
   reactive,
 } from "vue";
 import Vex from "vexflow";
+import MidiWriter from 'midi-writer-js';
 
 // --- 基础配置 ---
 const instance = getCurrentInstance();
@@ -1596,6 +1600,305 @@ function deleteCurrentStave() {
       }
     },
   });
+}
+// --- MIDI 导出功能 ---
+/**
+ * 辅助：将 VexFlow 调号转换为 MIDI 调号数据
+ * @param {String} keySpec 例如 "C", "G", "Bb", "F#"
+ * @returns {Array} [sf, mi] -> [升降号数量, 大小调(0=大, 1=小)]
+ */
+function getMidiKeySignature(keySpec) {
+  // 映射表：VexFlow Key -> MIDI sf (升降号数量)
+  // 正数 = 升号数 (#)
+  // 负数 = 降号数 (b)
+  const map = {
+    'C':  0,
+    'G':  1,  // 1个升号
+    'D':  2,
+    'A':  3,
+    'E':  4,
+    'B':  5,
+    'F#': 6,
+    'C#': 7,
+    'F': -1,  // 1个降号
+    'Bb': -2,
+    'Eb': -3,
+    'Ab': -4,
+    'Db': -5,
+    'Gb': -6,
+    'Cb': -7
+  };
+
+  // 默认为 C 大调 (0)
+  const sf = map[keySpec] !== undefined ? map[keySpec] : 0;
+  
+  // 目前你的编辑器只有大调，所以 mi 固定为 0
+  // 如果以后支持小调 (如 'Am'), 需要额外逻辑判断
+  const mi = 0; 
+
+  return [sf, mi];
+}
+/**
+ * 将 VexFlow 时值转换为 midi-writer-js 支持的格式
+ * 修复：通过数组相加的方式完美解决附点时值问题
+ * 例如：'hd' (附点二分) -> ['2', '4'] (即 2分 + 4分)
+ */
+function getMidiDuration(vexDuration) {
+  if (!vexDuration) return '4';
+
+  // 1. 判断是否有附点
+  const isDotted = vexDuration.includes('d');
+  
+  // 2. 获取基础时值键 (去除 r 和 d)
+  const cleanKey = vexDuration.replace(/[rd]/g, '').trim();
+
+  // 3. 基础映射表 (VexFlow -> MidiWriter String)
+  const baseMap = {
+    'w': '1',   // 全音符
+    'h': '2',   // 二分
+    'q': '4',   // 四分
+    '8': '8',   // 八分
+    '16': '16',
+    '32': '32',
+    '64': '64'
+  };
+
+  // 4. 附点增量映射表 (当前音符 -> 附点代表的时值)
+  // 逻辑：附点代表时值的一半
+  const dotMap = {
+    '1': '2',   // 全音符的附点是二分
+    '2': '4',   // 二分音符的附点是四分
+    '4': '8',   // 四分音符的附点是八分
+    '8': '16',  // 八分音符的附点是十六分
+    '16': '32',
+    '32': '64',
+    '64': '64'  // 兜底，极短音符忽略
+  };
+
+  const baseMidi = baseMap[cleanKey] || '4';
+
+  // 5. 【核心修复】如果是附点，返回数组 ['2', '4']
+  if (isDotted) {
+    const dotMidi = dotMap[baseMidi];
+    if (dotMidi) {
+      return [baseMidi, dotMidi]; // 库会自动相加这两个时值
+    }
+  }
+
+  // 不是附点，直接返回字符串
+  return baseMidi;
+}
+
+/**
+ * 将 VexFlow 音高转换为 MIDI 音高
+ * 例如: "C#/4" -> "C#4", "Bb/5" -> "Bb5", "Gn/4" -> "G4"
+ */
+function getMidiPitch(vexPitch) {
+  if (!vexPitch) return [];
+  
+  // 分割音名和八度
+  const parts = vexPitch.split('/');
+  if (parts.length < 2) return ['C4']; // 兜底
+
+  let key = parts[0]; 
+  const octave = parts[1];
+
+  // 移除还原号 'n' (MIDI 不需要显式还原，G4 本身就是自然音)
+  key = key.replace('n', '');
+
+  return [key + octave];
+}
+
+/**
+ * 导出 MIDI 文件 (修正版)
+ */
+function exportMidiFile() {
+  if (!staveList.value || staveList.value.length === 0) return;
+  console.log("staveList.value",);
+  
+  try {
+    // 1. 创建一个新的 Track
+    const track = new MidiWriter.Track();
+
+    // 2. 设置乐器 (1 = Acoustic Grand Piano)
+    track.addEvent(new MidiWriter.ProgramChangeEvent({ instrument: 1 }));
+
+    // 3. 获取第一行的配置作为全局配置
+    const firstConfig = staveList.value[0].config;
+    
+    // 设置拍号
+    const [num, den] = (firstConfig.timeSignature || '4/4').split('/');
+    track.setTimeSignature(parseInt(num), parseInt(den));
+    // ============================================================
+    // 【新增】3. 设置调号 (Key Signature)
+    // ============================================================
+    const currentKey = firstConfig.keySignature || 'C';
+    const [sf, mi] = getMidiKeySignature(currentKey);
+    
+    // midi-writer-js 支持 setKeySignature(sf, mi)
+    track.setKeySignature(sf, mi);
+    // ===========================================================
+    // 设置速度
+    track.setTempo(120);
+
+    // 4. 遍历所有行，将音符写入 Track
+    staveList.value.forEach((stave) => {
+      stave.notes.forEach((note) => {
+      // 1. 调用修复后的函数，直接拿到如 '2d' 或 '4' 的字符串
+        const midiDurationStr = getMidiDuration(note.duration);
+        
+        const isRest = note.duration.includes('r');
+console.log("midiDurationStr",midiDurationStr);
+
+        if (isRest) {
+          // 休止符
+          track.addEvent(new MidiWriter.NoteEvent({
+            pitch: null, 
+            duration: midiDurationStr, // 直接传入 '2d'
+            wait: 0 
+            // 注意：这里删掉了 dots 属性，因为已经在 duration 字符串里了
+          }));
+        } else {
+          // 普通音符
+          const midiPitch = getMidiPitch(note.pitch);
+          track.addEvent(new MidiWriter.NoteEvent({
+            pitch: midiPitch,
+            duration: midiDurationStr, // 直接传入 '2d'
+            velocity: 85
+            // 注意：这里删掉了 dots 属性
+          }));
+        }
+      });
+    });
+
+    // 5. 生成文件数据
+    // 【修正这里】：直接传入数组，不要写 tracks = ...
+    const writer = new MidiWriter.Writer([track]);
+    
+    // 6. 调用保存逻辑
+    // #ifdef H5
+    saveMidiWeb(writer);
+    // #endif
+
+    // #ifdef MP-WEIXIN || APP-PLUS
+    saveMidiMiniProgram(writer);
+    // #endif
+
+  } catch (error) {
+    console.error("MIDI导出异常:", error);
+    uni.showToast({ title: '导出出错: ' + error.message, icon: 'none' });
+  }
+}
+// --- H5 / Web 端下载逻辑 ---
+function saveMidiWeb(writer) {
+  try {
+    // 【关键修复】
+    // 1. 获取原始数据
+    const midiData = writer.buildFile();
+    
+    // 2. 创建 Blob 对象 (MIME type: audio/midi)
+    const blob = new Blob([midiData], { type: 'audio/midi' });
+    
+    // 3. 创建下载链接
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `score_${Date.now()}.mid`;
+    document.body.appendChild(link);
+    link.click();
+    
+    // 清理
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+    
+  } catch (e) {
+    console.error('H5导出失败', e);
+    alert('导出失败');
+  }
+}
+
+
+// --- 小程序 / App 端保存逻辑 ---
+function saveMidiMiniProgram(writer) {
+  try {
+    // 1. 获取二进制数据并转为 base64
+    const midiData = writer.buildFile();
+    const base64Str = uni.arrayBufferToBase64(midiData.buffer);
+
+    // 2. 确定保存路径 (使用临时用户目录)
+    const fs = uni.getFileSystemManager();
+    // 文件名加上时间戳，防止缓存冲突
+    const fileName = `${uni.env.USER_DATA_PATH}/score_${Date.now()}.mid`;
+
+    // 3. 写入文件到小程序沙箱
+    fs.writeFile({
+      filePath: fileName,
+      data: base64Str,
+      encoding: 'base64',
+      success: () => {
+        console.log('MIDI 文件已写入沙箱:', fileName);
+
+        // 4. 弹出操作菜单，让用户选择如何保存
+        uni.showActionSheet({
+          itemList: ['打开预览 (可另存为)', '发送给朋友 (保存到聊天)'],
+          success: function (res) {
+            // --- 选项 A: 打开预览 ---
+            if (res.tapIndex === 0) {
+              uni.openDocument({
+                filePath: fileName,
+                showMenu: true, // 关键：允许右上角显示菜单
+                fileType: 'mid', // 显式指定类型，防止安卓无法识别
+                success: function () {
+                  console.log('文件打开成功');
+                },
+                fail: function (err) {
+                  // 安卓有时候打不开 .mid，提示用户用第二种方式
+                  uni.showModal({
+                    title: '预览失败',
+                    content: '当前设备不支持直接预览 MIDI，请尝试“发送给朋友”来保存文件。',
+                    showCancel: false
+                  });
+                }
+              });
+            } 
+            // --- 选项 B: 发送给朋友 (推荐) ---
+            else if (res.tapIndex === 1) {
+              // #ifdef MP-WEIXIN
+              uni.shareFileMessage({
+                filePath: fileName,
+                fileName: 'my_score.mid', // 聊天窗口显示的文件名
+                success: () => {
+                  console.log('分享成功');
+                },
+                fail: (err) => {
+                  console.error('分享失败', err);
+                  // 如果用户取消了分享，通常不提示错误
+                  if (err.errMsg.indexOf('cancel') === -1) {
+                    uni.showToast({ title: '发送失败', icon: 'none' });
+                  }
+                }
+              });
+              // #endif
+
+              // #ifndef MP-WEIXIN
+              uni.showToast({ title: '当前环境不支持直接分享文件', icon: 'none' });
+              // #endif
+            }
+          },
+          fail: function (res) {
+            console.log(res.errMsg);
+          }
+        });
+      },
+      fail: (err) => {
+        console.error('写入文件失败', err);
+        uni.showToast({ title: '导出失败: ' + err.errMsg, icon: 'none' });
+      }
+    });
+  } catch (e) {
+    console.error('构建MIDI数据失败', e);
+    uni.showToast({ title: '生成MIDI失败', icon: 'none' });
+  }
 }
 </script>
 
