@@ -17,12 +17,12 @@
 
   <!-- 音符工具栏 -->
   <view class="note_tools">
-    <view class="item add" @click="addStave">新增行</view>
-    <view class="item delete" @click="clearCurrentStaveNotes">清空行</view>
-    <view class="item delete" @click="deleteCurrentStave">删除行</view>
-    <view class="item delete" @click="deleteSelectedNote">删除音符</view>
-    <view class="item delete" @click="resetScore">初始化</view>
-    <view class="item save" @click="exportMidiFile"> 导出MIDI </view>
+    <view class="item add" @tap="addStave">新增行</view>
+    <view class="item delete" @tap="clearCurrentStaveNotes">清空行</view>
+    <view class="item delete" @tap="deleteCurrentStave">删除行</view>
+    <view class="item delete" @tap="deleteSelectedNote">删除音符</view>
+    <view class="item delete" @tap="resetScore">初始化</view>
+    <view class="item save" @tap="exportMidiFile"> 导出MIDI </view>
   </view>
 
   <view class="tools">
@@ -163,14 +163,14 @@ const activeStaveConfig = computed(() => {
     ? stave.config
     : { clef: "treble", keySignature: "C", timeSignature: "4/4" };
 });
-const list = ref(["谱号", "调号", "拍号", "记号"]);
+const list = ref(["谱号", "调号", "拍号", "音符记号"]);
 const current = ref(1);
 // --- 常量定义 ---
 const clefList = [
-  { value: "treble", label: "高音" },
-  { value: "bass", label: "低音" },
-  { value: "alto", label: "中音" },
-  { value: "tenor", label: "次中音" },
+  { value: "treble", label: "高音谱号" },
+  { value: "bass", label: "低音谱号" },
+  { value: "alto", label: "中音谱号" },
+  { value: "tenor", label: "次中音谱号" },
 ];
 const timeSignatureList = [
   { id: "4/4" },
@@ -600,7 +600,6 @@ function insertNoteToStave(staveId, pitch, duration) {
   // 2. 创建新音符
   const newId = Date.now();
   const newNote = { pitch, duration, id: newId };
-console.log("222index",insertIndex);
   // 3. 插入数据
   notes.splice(insertIndex, 0, newNote);
 
@@ -1728,7 +1727,6 @@ const playNote = (note) => {
   //   innerAudioContext.destroy();
   // });
   const noteData = pianoKeyToVexFlow(note);
-  console.log("note", noteData, note);
   createNote(noteData.key)
 };
 </script>
@@ -1774,11 +1772,13 @@ const playNote = (note) => {
   padding: 10rpx 20rpx;
   flex-wrap: wrap;
   justify-content: space-between;
+  margin-bottom: 8rpx;
   .note-btn {
+    flex: 1;
     white-space: nowrap;
     width: max-content;
     text-align: center;
-    padding: 10rpx;
+    padding:8rpx 10rpx;
     border: 1px solid #ccc;
     border-radius: 10rpx;
     font-size: 30rpx;
@@ -1826,7 +1826,8 @@ const playNote = (note) => {
   .keySignatureList {
     margin: 20rpx 20rpx;
     display: flex;
-    flex-wrap: wrap;
+    flex-wrap: nowrap;
+    overflow-x: auto;
     gap: 10rpx;
     .item {
       padding: 6rpx 12rpx;
@@ -1843,13 +1844,13 @@ const playNote = (note) => {
   }
 }
 .tools {
-  height: 17vh;
+  // height: 17vh;
   overflow-y: auto;
 }
 .note_tools,
 .modifier-tools .tool-group {
   display: flex;
-  padding: 10rpx 20rpx;
+  padding: 20rpx 20rpx 10rpx 20rpx;
   font-size: 32rpx;
   gap: 20rpx;
   .item {
@@ -1861,6 +1862,13 @@ const playNote = (note) => {
       color: #fff;
       border-color: #1890ff;
     }
+  }
+}
+.note_tools{
+  flex-wrap: nowrap;
+  overflow-x: scroll;
+  .item{
+    white-space: nowrap;
   }
 }
 </style>

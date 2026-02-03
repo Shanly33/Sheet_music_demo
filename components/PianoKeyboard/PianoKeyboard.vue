@@ -12,11 +12,10 @@
           v-for="(key, index) in pianoKeys"
           :key="key.id"
           class="white-key"
+          data-type="white"
           :class="{ active: activeKey === key.id }"
-          @touchstart="handleTouchStart(key.id)"
-          @touchend="handleTouchEnd(key.id)"
-          @mousedown="handleTouchStart(key.id)"
-          @mouseup="handleTouchEnd(key.id)"
+          @touchstart.self="handleTouchStart(key.id,$event,'white')"
+          @touchend.self="handleTouchEnd(key.id,$event,'white')"
           :style="{ zIndex: 99 - index }"
         >
           <!-- 白键文字 (底部) -->
@@ -26,11 +25,10 @@
           <view
             v-if="key.hasBlack"
             class="black-key"
+            data-type="black"
             :class="{ active: activeKey === key.blackId }"
-            @touchstart.stop="handleTouchStart(key.blackId)"
-            @touchend.stop="handleTouchEnd(key.id)"
-            @mousedown.stop="handleTouchStart(key.blackId)"
-            @mouseup.stop="handleTouchEnd(key.id)"
+            @touchstart="handleTouchStart(key.blackId,$event,'black')"
+            @touchend="handleTouchEnd(key.blackId,$event,'black');"
           >
             <!-- 黑键文字 (垂直居中，白色) -->
             <text class="black-label">{{ key.blackName }}</text>
@@ -134,25 +132,24 @@ const generate88Keys = () => {
 
 
 // 按下按键 (绑定在具体的 Key 上)
-const handleTouchStart = (note) => {
+const handleTouchStart = (note,e,type) => {
+  const targetType=e.target.dataset?.type
   // 记录当前按下的键，用于显示高亮
-  activeKey.value = note;
+  if(targetType===type)activeKey.value = note;
 };
 
 // 松开按键 (绑定在具体的 Key 上)
-const handleTouchEnd = (note) => {
-  console.log("是否滚动",isScrolling.value);
-  
+const handleTouchEnd = (note,e,type) => {
   // 【关键判断】：如果是滚动行为，不触发播放，直接结束
   if (isScrolling.value) {
     isScrolling.value=false;
     activeKey.value = null;
     return;
   }
-
-  // 只有非滚动状态才播放
-  emit("play", note);
   activeKey.value = null;
+  const targetType=e.target.dataset?.type
+  // 记录当前按下的键，用于显示高亮
+  if(targetType===type)emit('play',note)
 };
 
 
@@ -167,7 +164,7 @@ onMounted(() => {
 <style lang="scss" scoped>
 .piano-wrapper {
   width: 100%;
-  height: 220rpx;
+  height: 210rpx;
   background-color: #222;
   position: relative;
 }
@@ -184,7 +181,7 @@ onMounted(() => {
 .keyboard-container {
   display: inline-flex; // 使用 inline-flex 让内容撑开宽度
   height: 100%;
-  padding: 0 20rpx; // 两侧留白
+  padding: 0 0rpx; // 两侧留白
 }
 
 /* --- 白键样式 --- */
@@ -216,6 +213,7 @@ onMounted(() => {
   font-size: 18rpx;
   color: #333;
   font-weight: bold;
+  pointer-events: none;
 }
 
 /* --- 黑键样式 --- */
@@ -249,5 +247,6 @@ onMounted(() => {
   // writing-mode: vertical-lr; // 如果文字太长，可以竖排，或者直接横排
   line-height: 1;
   margin-bottom: 10rpx;
+  pointer-events: none;
 }
 </style>
