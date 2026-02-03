@@ -474,7 +474,6 @@ function onCanvasClick(e) {
     const clickX = touch.pageX - res[0].left;
     const clickY = touch.pageY - res[0].top;
 
-    let foundStave = false;
     let foundNote = false;
 
     // 1. 遍历所有行，查找是否点中了某个音符
@@ -533,8 +532,7 @@ function onCanvasClick(e) {
       }
       if (foundNote) break;
     }
-
-    // 2. 如果没有点中音符，判断是否点中了行（原有逻辑）
+    // 2. 如果没有点中音符，判断是否点中了行
     if (!foundNote) {
       // 点击空白处，取消音符选中
       selectedNoteId.value = null;
@@ -545,20 +543,20 @@ function onCanvasClick(e) {
         octave: "",
         pitch: "",
       };
+      // 选中的行
       for (let id in layoutMaps) {
         const layout = layoutMaps[id];
         // 扩大一点判定范围
         if (
-          clickY >= layout.y - 40 &&
-          clickY <= layout.y + layout.height + 40
+          clickY >= layout.y&&
+          clickY <= layout.bottom
         ) {
           activeStaveId.value = parseInt(id);
-          foundStave = true;
           break;
         }
       }
     }
-
+    
     // 重绘以更新高亮状态
     drawScore();
   });
