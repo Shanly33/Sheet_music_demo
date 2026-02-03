@@ -25,14 +25,14 @@
 
   <!-- 音符工具栏 -->
   <view class="note_tools">
-    <view class="item add" @click="addStave">新增行</view>
+    <!-- <view class="item add" @click="addStave">新增行</view> -->
     <view class="item delete" @click="clearCurrentStaveNotes">清空行</view>
-    <view class="item delete" @click="deleteCurrentStave">删除行</view>
+    <!-- <view class="item delete" @click="deleteCurrentStave">删除行</view> -->
     <view class="item delete" @click="deleteSelectedNote">删除音符</view>
     <view class="item delete" @click="resetScore">初始化</view>
-    <view class="item save" @click="exportMidiFile">
+    <!-- <view class="item save" @click="exportMidiFile">
       导出MIDI
-    </view>
+    </view> -->
   </view>
 
   <view class="note-bar">

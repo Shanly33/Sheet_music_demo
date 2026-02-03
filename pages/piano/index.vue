@@ -17,12 +17,12 @@
 
   <!-- 音符工具栏 -->
   <view class="note_tools">
-    <view class="item add" @tap="addStave">新增行</view>
+    <!-- <view class="item add" @tap="addStave">新增行</view> -->
     <view class="item delete" @tap="clearCurrentStaveNotes">清空行</view>
-    <view class="item delete" @tap="deleteCurrentStave">删除行</view>
+    <!-- <view class="item delete" @tap="deleteCurrentStave">删除行</view> -->
     <view class="item delete" @tap="deleteSelectedNote">删除音符</view>
     <view class="item delete" @tap="resetScore">初始化</view>
-    <view class="item save" @tap="exportMidiFile"> 导出MIDI </view>
+    <!-- <view class="item save" @tap="exportMidiFile"> 导出MIDI </view> -->
   </view>
 
   <view class="tools">
