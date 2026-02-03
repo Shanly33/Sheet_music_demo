@@ -181,10 +181,10 @@ const list = ref(["谱号", "调号", "拍号", "记号"]);
 const current = ref(1);
 // --- 常量定义 ---
 const clefList = [
-  { value: "treble", label: "高音" },
-  { value: "bass", label: "低音" },
-  { value: "alto", label: "中音" },
-  { value: "tenor", label: "次中音" },
+  { value: "treble", label: "高音谱号" },
+  { value: "bass", label: "低音谱号" },
+  { value: "alto", label: "中音谱号" },
+  { value: "tenor", label: "次中音谱号" },
 ];
 const timeSignatureList = [
   { id: "4/4" },
@@ -489,7 +489,6 @@ function onCanvasClick(e) {
     const clickX = touch.pageX - res[0].left;
     const clickY = touch.pageY - res[0].top;
 
-    let foundStave = false;
     let foundNote = false;
 
     // 1. 遍历所有行，查找是否点中了某个音符
@@ -564,11 +563,10 @@ function onCanvasClick(e) {
         const layout = layoutMaps[id];
         // 扩大一点判定范围
         if (
-          clickY >= layout.y - 40 &&
-          clickY <= layout.y + layout.height + 40
+          clickY >= layout.y &&
+          clickY <= layout.bottom
         ) {
           activeStaveId.value = parseInt(id);
-          foundStave = true;
           break;
         }
       }
@@ -721,7 +719,6 @@ function insertNoteToStave(staveId, targetX, pitch, duration) {
   // 2. 创建新音符
   const newId = Date.now();
   const newNote = { pitch, duration, id: newId };
-console.log("222index",insertIndex);
 
   // 3. 插入数据
   notes.splice(insertIndex, 0, newNote);
@@ -1942,8 +1939,9 @@ function saveMidiMiniProgram(writer) {
   // overflow-x: scroll;
   gap: 20rpx;
   padding: 10rpx 20rpx;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   .note-btn {
+    flex: 1;
     white-space: nowrap;
     width: max-content;
     text-align: center;
@@ -2030,6 +2028,13 @@ function saveMidiMiniProgram(writer) {
       color: #fff;
       border-color: #1890ff;
     }
+  }
+}
+.note_tools{
+  flex-wrap: nowrap;
+  overflow-x: scroll;
+  .item{
+    white-space: nowrap;
   }
 }
 </style>
